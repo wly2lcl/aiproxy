@@ -1,0 +1,68 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+server
+aiproxy
+bin/
+dist/
+
+# Test files
+*_test.go
+testdata/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+LICENSE
+
+# Docker
+Dockerfile
+docker-compose*.yaml
+.dockerignore
+
+# Scripts
+scripts/
+Makefile
+
+# Data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Config
+config/config.json
+config/config.local.json
+
+# Logs
+*.log
+logs/
+
+# Temporary
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+# Coverage
+coverage.out
+coverage.html
+
+# Environment
+.env
+.env.local
+.env.*.local

@@ -1,0 +1,371 @@
+{
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 服务器配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "server": {
+    // 服务监听地址，0.0.0.0 表示接受所有网卡请求
+    "host": "0.0.0.0",
+    // 公共 API 端口
+    "port": 8080,
+    // 读取请求超时时间（等待客户端发送数据的最长时间）
+    "read_timeout": "30s",
+    // 写入响应超时时间（非流式请求的最长处理时间）
+    "write_timeout": "120s",
+    // 连接空闲超时时间（Keep-Alive 连接的最大空闲时间）
+    "idle_timeout": "120s",
+    // 优雅关闭超时时间（等待现有请求完成的最长时间）
+    "graceful_shutdown_timeout": "30s",
+    // 请求体最大大小（字节），10MB = 10 * 1024 * 1024
+    "max_request_body_size": 10485760
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 数据库配置 (SQLite)
+  // ═══════════════════════════════════════════════════════════════════════════
+  "database": {
+    // 数据库文件路径
+    "path": "data/aiproxy.db",
+    // 数据库繁忙时的等待超时（毫秒）
+    "busy_timeout": 5000,
+    // 日志模式：WAL (Write-Ahead Logging) 提供更好的并发性能
+    "journal_mode": "WAL",
+    // 缓存大小（负数表示 KB，-64000 = 64MB）
+    "cache_size": -64000,
+    // 自动清理模式：INCREMENTAL 表示增量清理
+    "auto_vacuum": "INCREMENTAL"
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 日志配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "logging": {
+    // 日志级别：debug, info, warn, error
+    "level": "info",
+    // 日志格式：json, text
+    "format": "json",
+    // 日志输出：stdout, stderr, 或文件路径
+    "output": "stdout",
+    // 是否在日志中包含请求体（调试用，可能暴露敏感信息）
+    "include_request_body": false,
+    // 是否在日志中包含响应体（调试用，会增加日志量）
+    "include_response_body": false
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 认证配置（公共 API）
+  // ═══════════════════════════════════════════════════════════════════════════
+  "auth": {
+    // 是否启用 API Key 认证
+    "enabled": true,
+    // 有效的 API Key 列表（客户端请求时需携带）
+    "api_keys": [
+      "sk-aiproxy-secret-key-1",
+      "sk-aiproxy-secret-key-2"
+    ],
+    // 认证头名称
+    "header_name": "Authorization",
+    // API Key 前缀（如 "Bearer "）
+    "key_prefix": "Bearer "
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Provider 配置（上游 API 提供商）
+  // ═══════════════════════════════════════════════════════════════════════════
+  "providers": [
+    {
+      // Provider 标识符，用于路由和日志
+      "name": "openrouter",
+      // API 基础地址
+      "api_base": "https://openrouter.ai/api/v1",
+      // 该 Provider 支持的模型列表
+      "models": [
+        "anthropic/claude-3.5-sonnet",
+        "anthropic/claude-3-opus",
+        "openai/gpt-4o",
+        "openai/gpt-4o-mini"
+      ],
+      // 是否为默认 Provider（当模型匹配多个 Provider 时优先使用）
+      "is_default": true,
+      // 是否启用该 Provider
+      "is_enabled": true,
+      // 自定义请求头（某些 Provider 需要额外头信息）
+      "headers": {
+        // OpenRouter 需要 HTTP-Referer 和 X-Title
+        "HTTP-Referer": "https://your-site.com",
+        "X-Title": "Your App Name"
+      },
+      // 非流式请求超时时间
+      "timeout": "30s",
+      // 流式请求超时时间（通常需要更长）
+      "stream_timeout": "120s",
+      
+      // ═══════════════════════════════════════════════════════════════════════════
+      // API Key 池配置（可配置多个账户实现负载均衡）
+      // ═══════════════════════════════════════════════════════════════════════════
+      "api_keys": [
+        {
+          // API Key（必填）
+          "key": "sk-or-v1-key1",
+          // 账户名称（便于识别，可选）
+          "name": "primary-account",
+          // ─────────────────────────────────────────────────────────────────────
+          // weight 权重：加权轮询算法使用
+          // - 作用：在【同一 priority 组】内按比例分配请求
+          // - 示例：weight=2 和 weight=1，则请求比例约为 2:1
+          // - 仅在相同 priority 的账户之间生效
+          // ─────────────────────────────────────────────────────────────────────
+          "weight": 2,
+          // ─────────────────────────────────────────────────────────────────────
+          // priority 优先级：决定账户使用顺序
+          // - 作用：优先使用 priority 值【更大】的账户
+          // - 规则：priority=2 的账户完全用尽后，才会使用 priority=1 的账户
+          // - 场景：主备账户切换、多级账户池
+          // ─────────────────────────────────────────────────────────────────────
+          "priority": 2,
+          // 是否启用该账户
+          "is_enabled": true,
+          // 速率限制配置
+          "limits": {
+            // 每分钟请求数限制（滑动窗口）
+            "rpm": 20,
+            // 每日请求数限制（UTC 0点重置）
+            "daily": 1000,
+            // 5小时窗口请求数限制（滚动窗口）
+            "window_5h": 200,
+            // 每月请求数限制（UTC 每月1日重置）
+            "monthly": 30000,
+            // 每日 Token 数限制
+            "token_daily": 1000000,
+            // 每月 Token 数限制
+            "token_monthly": 30000000
+          }
+        },
+        {
+          "key": "sk-or-v1-key2",
+          "name": "backup-account",
+          // 备用账户权重较低
+          "weight": 1,
+          // priority=1 比 priority=2 低，所以是备用账户
+          // 只有 priority=2 的账户都不可用时才会使用
+          "priority": 1,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 10,
+            "daily": 500
+          }
+        }
+      ],
+      
+      // 重试配置（失败时自动重试）
+      "retry": {
+        // 最大重试次数
+        "max_retries": 3,
+        // 初始等待时间
+        "initial_wait": "1s",
+        // 最大等待时间
+        "max_wait": "30s",
+        // 等待时间乘数（指数退避）
+        "multiplier": 2.0
+      },
+      
+      // 熔断器配置（防止雪崩效应）
+      "circuit_breaker": {
+        // 触发熔断的连续失败次数阈值
+        "threshold": 5,
+        // 熔断后等待恢复的时间
+        "timeout": "60s",
+        // 半开状态下允许的测试请求数
+        "half_open_requests": 1
+      }
+    },
+    {
+      // OpenAI 官方 API
+      "name": "openai",
+      "api_base": "https://api.openai.com/v1",
+      "models": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo"
+      ],
+      "is_default": false,
+      "is_enabled": true,
+      "headers": {},
+      "timeout": "30s",
+      "stream_timeout": "120s",
+      "api_keys": [
+        {
+          "key": "sk-proj-your-openai-key-1",
+          "name": "openai-primary",
+          "weight": 2,
+          "priority": 2,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 500,
+            "daily": 10000,
+            "token_daily": 5000000,
+            "token_monthly": 100000000
+          }
+        },
+        {
+          "key": "sk-proj-your-openai-key-2",
+          "name": "openai-backup",
+          "weight": 1,
+          "priority": 1,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 60,
+            "daily": 2000
+          }
+        }
+      ],
+      "retry": {
+        "max_retries": 3,
+        "initial_wait": "1s",
+        "max_wait": "30s",
+        "multiplier": 2.0
+      },
+      "circuit_breaker": {
+        "threshold": 5,
+        "timeout": "60s",
+        "half_open_requests": 1
+      }
+    },
+    {
+      // Groq API（高速推理）
+      "name": "groq",
+      "api_base": "https://api.groq.com/openai/v1",
+      "models": [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768"
+      ],
+      "is_default": false,
+      "is_enabled": true,
+      "headers": {},
+      "timeout": "30s",
+      "stream_timeout": "120s",
+      "api_keys": [
+        {
+          "key": "gsk_your_groq_key",
+          "name": "groq-primary",
+          "weight": 1,
+          "priority": 2,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 30,
+            "daily": 14400
+          }
+        }
+      ],
+      "retry": {
+        "max_retries": 3,
+        "initial_wait": "1s",
+        "max_wait": "30s",
+        "multiplier": 2.0
+      },
+      "circuit_breaker": {
+        "threshold": 5,
+        "timeout": "60s",
+        "half_open_requests": 1
+      }
+    }
+  ],
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 模型别名映射
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 将简短别名映射到完整的模型名称
+  // 格式: "别名": "provider/model-name"
+  "model_mapping": {
+    "gpt-4": "openai/gpt-4o",
+    "gpt-4-turbo": "openai/gpt-4o",
+    "gpt-3.5-turbo": "openai/gpt-4o-mini",
+    "claude-3": "anthropic/claude-3.5-sonnet"
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 故障转移配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "fallback": {
+    // 是否启用故障转移
+    "enabled": true,
+    // 故障转移策略：sequential（顺序尝试）, parallel（并行尝试）, round_robin（轮询）
+    "strategy": "sequential",
+    // 故障转移时尝试的 Provider 顺序
+    "providers": ["openrouter", "openai", "groq"]
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 管理 API 配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "admin": {
+    // 是否启用管理 API
+    "enabled": true,
+    // 管理 API 监听地址（建议只监听本地，不对外暴露）
+    "listen": "127.0.0.1:8081",
+    // 管理 API 密钥列表
+    "api_keys": [
+      "admin-secret-key-1"
+    ],
+    // 管理 API 每分钟请求限制
+    "rate_limit": 100
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 监控指标配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "metrics": {
+    // 是否启用指标收集
+    "enabled": true,
+    // Prometheus 指标配置
+    "prometheus": {
+      "enabled": true,
+      // Prometheus 指标暴露路径
+      "path": "/metrics"
+    },
+    // JSON 格式指标配置（用于 /admin/stats 端点）
+    "json": {
+      "enabled": true
+    },
+    // 指标命名空间（Prometheus 指标前缀）
+    "namespace": "aiproxy"
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Token 追踪配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "token_tracking": {
+    // 是否启用 Token 统计
+    "enabled": true,
+    // 流式模式 Token 追踪方式：
+    // - hybrid: 优先使用响应中的 usage 字段，无法获取时估算
+    // - streaming: 仅使用流式响应中的 usage 字段
+    // - response: 仅使用非流式响应估算
+    "streaming_mode": "hybrid",
+    // Token 估算参数：每个 Token 约等于多少字符（英文约 4 字符/token）
+    "estimation_chars_per_token": 4,
+    // 流式与非流式 Token 数据对账间隔
+    "reconciliation_interval": "5m"
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 速率限制全局配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "rate_limits": {
+    // 过期限制记录的清理间隔
+    "cleanup_interval": "1h",
+    // 5小时窗口的持续时间
+    "window_5h_duration": "5h"
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Request ID 配置
+  // ═══════════════════════════════════════════════════════════════════════════
+  "request_id": {
+    // Request ID 响应头名称
+    "header_name": "X-Request-ID",
+    // 如果请求中没有 Request ID，是否自动生成
+    "generate_if_missing": true
+  }
+}

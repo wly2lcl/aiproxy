@@ -1,0 +1,227 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "read_timeout": "30s",
+    "write_timeout": "120s",
+    "idle_timeout": "120s",
+    "graceful_shutdown_timeout": "30s",
+    "max_request_body_size": 10485760
+  },
+  "database": {
+    "path": "data/aiproxy.db",
+    "busy_timeout": 5000,
+    "journal_mode": "WAL",
+    "cache_size": -64000,
+    "auto_vacuum": "INCREMENTAL"
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "output": "stdout",
+    "include_request_body": false,
+    "include_response_body": false
+  },
+  "auth": {
+    "enabled": true,
+    "api_keys": [
+      "sk-aiproxy-secret-key-1",
+      "sk-aiproxy-secret-key-2"
+    ],
+    "header_name": "Authorization",
+    "key_prefix": "Bearer "
+  },
+  "providers": [
+    {
+      "name": "openrouter",
+      "api_base": "https://openrouter.ai/api/v1",
+      "models": [
+        "anthropic/claude-3.5-sonnet",
+        "anthropic/claude-3-opus",
+        "openai/gpt-4o",
+        "openai/gpt-4o-mini"
+      ],
+      "is_default": true,
+      "is_enabled": true,
+      "headers": {
+        "HTTP-Referer": "https://your-site.com",
+        "X-Title": "Your App Name"
+      },
+      "timeout": "30s",
+      "stream_timeout": "120s",
+      "api_keys": [
+        {
+          "key": "sk-or-v1-key1",
+          "name": "primary-account",
+          "weight": 2,
+          "priority": 2,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 20,
+            "daily": 1000,
+            "window_5h": 200,
+            "monthly": 30000,
+            "token_daily": 1000000,
+            "token_monthly": 30000000
+          }
+        },
+        {
+          "key": "sk-or-v1-key2",
+          "name": "backup-account",
+          "weight": 1,
+          "priority": 1,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 10,
+            "daily": 500
+          }
+        }
+      ],
+      "retry": {
+        "max_retries": 3,
+        "initial_wait": "1s",
+        "max_wait": "30s",
+        "multiplier": 2.0
+      },
+      "circuit_breaker": {
+        "threshold": 5,
+        "timeout": "60s",
+        "half_open_requests": 1
+      }
+    },
+    {
+      "name": "openai",
+      "api_base": "https://api.openai.com/v1",
+      "models": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo"
+      ],
+      "is_default": false,
+      "is_enabled": true,
+      "headers": {},
+      "timeout": "30s",
+      "stream_timeout": "120s",
+      "api_keys": [
+        {
+          "key": "sk-proj-your-openai-key-1",
+          "name": "openai-primary",
+          "weight": 2,
+          "priority": 2,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 500,
+            "daily": 10000,
+            "token_daily": 5000000,
+            "token_monthly": 100000000
+          }
+        },
+        {
+          "key": "sk-proj-your-openai-key-2",
+          "name": "openai-backup",
+          "weight": 1,
+          "priority": 1,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 60,
+            "daily": 2000
+          }
+        }
+      ],
+      "retry": {
+        "max_retries": 3,
+        "initial_wait": "1s",
+        "max_wait": "30s",
+        "multiplier": 2.0
+      },
+      "circuit_breaker": {
+        "threshold": 5,
+        "timeout": "60s",
+        "half_open_requests": 1
+      }
+    },
+    {
+      "name": "groq",
+      "api_base": "https://api.groq.com/openai/v1",
+      "models": [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768"
+      ],
+      "is_default": false,
+      "is_enabled": true,
+      "headers": {},
+      "timeout": "30s",
+      "stream_timeout": "120s",
+      "api_keys": [
+        {
+          "key": "gsk_your_groq_key",
+          "name": "groq-primary",
+          "weight": 1,
+          "priority": 2,
+          "is_enabled": true,
+          "limits": {
+            "rpm": 30,
+            "daily": 14400
+          }
+        }
+      ],
+      "retry": {
+        "max_retries": 3,
+        "initial_wait": "1s",
+        "max_wait": "30s",
+        "multiplier": 2.0
+      },
+      "circuit_breaker": {
+        "threshold": 5,
+        "timeout": "60s",
+        "half_open_requests": 1
+      }
+    }
+  ],
+  "model_mapping": {
+    "gpt-4": "openai/gpt-4o",
+    "gpt-4-turbo": "openai/gpt-4o",
+    "gpt-3.5-turbo": "openai/gpt-4o-mini",
+    "claude-3": "anthropic/claude-3.5-sonnet"
+  },
+  "fallback": {
+    "enabled": true,
+    "strategy": "sequential",
+    "providers": ["openrouter", "openai", "groq"]
+  },
+  "admin": {
+    "enabled": true,
+    "listen": "127.0.0.1:8081",
+    "api_keys": [
+      "admin-secret-key-1"
+    ],
+    "rate_limit": 100
+  },
+  "metrics": {
+    "enabled": true,
+    "prometheus": {
+      "enabled": true,
+      "path": "/metrics"
+    },
+    "json": {
+      "enabled": true
+    },
+    "namespace": "aiproxy"
+  },
+  "token_tracking": {
+    "enabled": true,
+    "streaming_mode": "hybrid",
+    "estimation_chars_per_token": 4,
+    "reconciliation_interval": "5m"
+  },
+  "rate_limits": {
+    "cleanup_interval": "1h",
+    "window_5h_duration": "5h"
+  },
+  "request_id": {
+    "header_name": "X-Request-ID",
+    "generate_if_missing": true
+  }
+}
