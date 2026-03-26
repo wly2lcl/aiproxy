@@ -33,8 +33,8 @@ Dockerfile
 docker-compose*.yaml
 .dockerignore
 
-# Scripts
-scripts/
+# Scripts (keep entrypoint)
+scripts/*
 !scripts/docker-entrypoint.sh
 Makefile
 
