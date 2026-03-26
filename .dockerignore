@@ -35,6 +35,7 @@ docker-compose*.yaml
 
 # Scripts
 scripts/
+!scripts/docker-entrypoint.sh
 Makefile
 
 # Data
