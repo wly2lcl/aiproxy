@@ -732,7 +732,7 @@ func TestIntegration_FullRequest(t *testing.T) {
 		t.Errorf("Expected ID 'test-id', got %s", resp.ID)
 	}
 
-	if resp.Choices[0].Message.Content != "Hello, how can I help you?" {
-		t.Errorf("Unexpected response content: %s", resp.Choices[0].Message.Content)
+	if resp.Choices[0].Message.Content.(string) != "Hello, how can I help you?" {
+		t.Errorf("Unexpected response content: %v", resp.Choices[0].Message.Content)
 	}
 }

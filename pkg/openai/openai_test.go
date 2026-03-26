@@ -117,8 +117,8 @@ func TestChatCompletionResponse_JSONUnmarshal(t *testing.T) {
 	if len(resp.Choices) != 1 {
 		t.Fatalf("Expected 1 choice, got %d", len(resp.Choices))
 	}
-	if resp.Choices[0].Message.Content != "Hello there!" {
-		t.Errorf("Expected content 'Hello there!', got %s", resp.Choices[0].Message.Content)
+	if resp.Choices[0].Message.Content.(string) != "Hello there!" {
+		t.Errorf("Expected content 'Hello there!', got %v", resp.Choices[0].Message.Content)
 	}
 	if resp.Usage == nil {
 		t.Fatal("Expected usage to be non-nil")
@@ -425,5 +425,81 @@ func TestChatMessage_ToolResponse(t *testing.T) {
 	}
 	if msg.ToolCallID != "call_123" {
 		t.Errorf("Expected tool_call_id 'call_123', got %s", msg.ToolCallID)
+	}
+}
+
+func TestChatMessage_MultimodalContent(t *testing.T) {
+	jsonStr := `{
+		"role": "user",
+		"content": [
+			{"type": "text", "text": "What's in this image?"},
+			{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
+		]
+	}`
+
+	var msg ChatMessage
+	if err := json.Unmarshal([]byte(jsonStr), &msg); err != nil {
+		t.Fatalf("Failed to unmarshal multimodal content: %v", err)
+	}
+
+	if msg.Role != "user" {
+		t.Errorf("Expected role 'user', got %s", msg.Role)
+	}
+
+	content, ok := msg.Content.([]interface{})
+	if !ok {
+		t.Fatalf("Expected content to be array, got %T", msg.Content)
+	}
+	if len(content) != 2 {
+		t.Errorf("Expected 2 content items, got %d", len(content))
+	}
+
+	textItem, ok := content[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected text item to be object, got %T", content[0])
+	}
+	if textItem["type"] != "text" {
+		t.Errorf("Expected first item type 'text', got %v", textItem["type"])
+	}
+	if textItem["text"] != "What's in this image?" {
+		t.Errorf("Expected text 'What's in this image?', got %v", textItem["text"])
+	}
+}
+
+func TestChatCompletionRequest_Multimodal(t *testing.T) {
+	jsonStr := `{
+		"model": "gpt-4-vision-preview",
+		"messages": [
+			{
+				"role": "user",
+				"content": [
+					{"type": "text", "text": "Describe this image"},
+					{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
+				]
+			}
+		]
+	}`
+
+	var req ChatCompletionRequest
+	if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
+		t.Fatalf("Failed to unmarshal multimodal request: %v", err)
+	}
+
+	if req.Model != "gpt-4-vision-preview" {
+		t.Errorf("Expected model 'gpt-4-vision-preview', got %s", req.Model)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(req.Messages))
+	}
+	if req.Messages[0].Role != "user" {
+		t.Errorf("Expected role 'user', got %s", req.Messages[0].Role)
+	}
+
+	content, ok := req.Messages[0].Content.([]interface{})
+	if !ok {
+		t.Fatalf("Expected content to be array for multimodal, got %T", req.Messages[0].Content)
+	}
+	if len(content) != 2 {
+		t.Errorf("Expected 2 content items, got %d", len(content))
 	}
 }
