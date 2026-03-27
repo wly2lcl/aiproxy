@@ -16,11 +16,13 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Path        string `json:"path"`
-	BusyTimeout int    `json:"busy_timeout"`
-	JournalMode string `json:"journal_mode"`
-	CacheSize   int    `json:"cache_size"`
-	AutoVacuum  string `json:"auto_vacuum"`
+	Path         string `json:"path"`
+	BusyTimeout  int    `json:"busy_timeout"`
+	JournalMode  string `json:"journal_mode"`
+	CacheSize    int    `json:"cache_size"`
+	AutoVacuum   string `json:"auto_vacuum"`
+	MaxOpenConns int    `json:"max_open_conns"`
+	MaxIdleConns int    `json:"max_idle_conns"`
 }
 
 type LoggingConfig struct {

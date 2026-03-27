@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/wangluyao/aiproxy/internal/config"
 	"github.com/wangluyao/aiproxy/internal/domain"
 
 	_ "modernc.org/sqlite"
@@ -16,29 +18,41 @@ type SQLite struct {
 	db *sql.DB
 }
 
-func NewSQLite(dbPath string) (*SQLite, error) {
-	db, err := sql.Open("sqlite", dbPath)
+func NewSQLite(cfg *config.DatabaseConfig) (*SQLite, error) {
+	busyTimeout := cfg.BusyTimeout
+	if busyTimeout <= 0 {
+		busyTimeout = 5000
+	}
+	journalMode := cfg.JournalMode
+	if journalMode == "" {
+		journalMode = "WAL"
+	}
+
+	dsn := cfg.Path
+	prefix := "?"
+	if strings.Contains(dsn, "?") {
+		prefix = "&"
+	}
+	dsn += fmt.Sprintf("%s_pragma=busy_timeout(%d)&_pragma=journal_mode(%s)", prefix, busyTimeout, journalMode)
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err = db.ExecContext(ctx, "PRAGMA journal_mode=WAL")
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to set journal mode: %w", err)
+	// Set connection pool settings suitable for WAL mode
+	// Multiple readers and 1 concurrent writer with timeout on contention
+	maxOpen := cfg.MaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = 25
+	}
+	maxIdle := cfg.MaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = maxOpen
 	}
 
-	_, err = db.ExecContext(ctx, "PRAGMA busy_timeout=5000")
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
-	}
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
 
 	if err := RunMigrations(db); err != nil {
 		db.Close()

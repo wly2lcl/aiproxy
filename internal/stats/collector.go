@@ -107,8 +107,8 @@ func (c *Collector) RecordRateLimitHit(accountID string, limitType domain.LimitT
 }
 
 func (c *Collector) GetSnapshot() *Snapshot {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	snapshot := &Snapshot{
 		Requests:     make(map[string]*RequestMetrics),
@@ -125,6 +125,10 @@ func (c *Collector) GetSnapshot() *Snapshot {
 		copied.Latency = make([]time.Duration, len(metrics.Latency))
 		copy(copied.Latency, metrics.Latency)
 		snapshot.Requests[key] = &copied
+
+		// FIX: Clear the latency slice after snapshot to prevent memory leak (OOM)
+		// We retain the slice capacity for GC efficiency
+		metrics.Latency = metrics.Latency[:0]
 	}
 
 	for key, count := range c.errors {

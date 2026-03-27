@@ -40,8 +40,6 @@ type ChatHandler struct {
 	collector           *stats.Collector
 	logger              Logger
 	selector            *pool.WeightedRoundRobin
-	streamHandler       *proxy.StreamHandler
-	tokenExtractor      *proxy.TokenExtractor
 	maxResponseBodySize int64
 }
 
@@ -68,7 +66,6 @@ func NewChatHandler(cfg *ChatConfig) *ChatHandler {
 		collector:           cfg.Collector,
 		logger:              cfg.Logger,
 		selector:            selector,
-		streamHandler:       proxy.NewStreamHandler(cfg.Proxy),
 		maxResponseBodySize: maxResponseBodySize,
 	}
 }
@@ -194,13 +191,14 @@ func (h *ChatHandler) handleStream(c *gin.Context, resp *http.Response, account 
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	err := h.streamHandler.ServeStream(c.Writer, c.Request, resp)
+	streamHandler := proxy.NewStreamHandler(h.proxy)
+	err := streamHandler.ServeStream(c.Writer, c.Request, resp)
 	if err != nil {
 		h.logger.Error("stream error", "error", err)
 	}
 
 	latency := time.Since(startTime)
-	promptTokens, completionTokens, found := h.extractStreamUsage()
+	promptTokens, completionTokens, found := streamHandler.GetTokenExtractor().ExtractFromStream(nil)
 
 	if found {
 		totalTokens := promptTokens + completionTokens
@@ -248,12 +246,7 @@ func (h *ChatHandler) handleNonStream(c *gin.Context, resp *http.Response, accou
 	}
 }
 
-func (h *ChatHandler) extractStreamUsage() (promptTokens, completionTokens int, found bool) {
-	if h.streamHandler != nil {
-		return h.streamHandler.GetTokenExtractor().ExtractFromStream(nil)
-	}
-	return 0, 0, false
-}
+
 
 func (h *ChatHandler) recordUsage(providerName, model string, status int, latency time.Duration, tokens int) {
 	if h.collector != nil {

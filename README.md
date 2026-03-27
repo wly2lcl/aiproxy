@@ -13,7 +13,7 @@ A high-performance multi-account LLM API gateway with intelligent load balancing
 - **Multi-Dimensional Rate Limiting**: RPM, daily, 5-hour window, monthly, and token limits
 - **SQLite Persistence**: Rate limit state survives restarts (WAL mode)
 - **Streaming Support**: Full SSE streaming for real-time responses
-- **Token Tracking**: Hybrid mode for accurate streaming token counting
+- **Token Tracking**: Hybrid mode for accurate streaming token counting (estimates tokens if upstream usage metadata is missing)
 - **Admin API**: Separate management interface on localhost
 - **Prometheus Metrics**: Built-in observability
 - **Graceful Shutdown**: Zero-downtime restarts
@@ -91,6 +91,8 @@ See [config/config.example.json](config/config.example.json) for a complete conf
 | `server.port` | Public API port | 8080 |
 | `server.host` | Public API host | 0.0.0.0 |
 | `database.path` | SQLite database path | data/aiproxy.db |
+| `database.max_open_conns` | SQLite max open connections | 25 |
+| `database.max_idle_conns` | SQLite max idle connections | 25 |
 | `auth.enabled` | Enable API key authentication | false |
 | `auth.api_keys` | List of valid API keys | [] |
 | `admin.enabled` | Enable admin API | true |

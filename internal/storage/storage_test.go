@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wangluyao/aiproxy/internal/config"
 	"github.com/wangluyao/aiproxy/internal/domain"
 )
 
@@ -560,13 +561,13 @@ func TestSQLite_Migrations(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	db1, err := NewSQLite(dbPath)
+	db1, err := NewSQLite(&config.DatabaseConfig{Path: dbPath})
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
 	db1.Close()
 
-	db2, err := NewSQLite(dbPath)
+	db2, err := NewSQLite(&config.DatabaseConfig{Path: dbPath})
 	if err != nil {
 		t.Fatalf("NewSQLite on existing database failed: %v", err)
 	}
@@ -589,7 +590,7 @@ func setupTestDB(t *testing.T) *SQLite {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	db, err := NewSQLite(dbPath)
+	db, err := NewSQLite(&config.DatabaseConfig{Path: dbPath})
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}

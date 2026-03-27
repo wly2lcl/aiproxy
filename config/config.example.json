@@ -14,7 +14,9 @@
     "busy_timeout": 5000,
     "journal_mode": "WAL",
     "cache_size": -64000,
-    "auto_vacuum": "INCREMENTAL"
+    "auto_vacuum": "INCREMENTAL",
+    "max_open_conns": 25,
+    "max_idle_conns": 25
   },
   "logging": {
     "level": "info",

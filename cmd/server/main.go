@@ -42,7 +42,6 @@ type Server struct {
 	registry            *provider.Registry
 	router              *router.Router
 	proxy               *proxy.Proxy
-	streamHandler       *proxy.StreamHandler
 	statsCollector      *stats.Collector
 	statsReporter       *stats.Reporter
 	accountPools        map[string]*pool.Pool
@@ -224,7 +223,7 @@ func (s *Server) initStorage() error {
 		}
 	}
 
-	store, err := storage.NewSQLite(dbPath)
+	store, err := storage.NewSQLite(&s.config.Database)
 	if err != nil {
 		return fmt.Errorf("failed to initialize SQLite storage: %w", err)
 	}
@@ -453,7 +452,6 @@ func (s *Server) initProxy() {
 	if streamingMode == "" {
 		streamingMode = "hybrid"
 	}
-	s.streamHandler = proxy.NewStreamHandlerWithConfig(s.proxy, charsPerToken, streamingMode)
 
 	slog.Info("initialized proxy", "chars_per_token", charsPerToken, "streaming_mode", streamingMode)
 }
@@ -800,14 +798,22 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	s.streamHandler.GetTokenExtractor().Reset()
+	charsPerToken := s.config.TokenTracking.EstimationCharsPerToken
+	if charsPerToken <= 0 {
+		charsPerToken = 4
+	}
+	streamingMode := s.config.TokenTracking.StreamingMode
+	if streamingMode == "" {
+		streamingMode = "hybrid"
+	}
+	streamHandler := proxy.NewStreamHandlerWithConfig(s.proxy, charsPerToken, streamingMode)
 
-	if err := s.streamHandler.ServeStream(c.Writer, c.Request, resp); err != nil {
+	if err := streamHandler.ServeStream(c.Writer, c.Request, resp); err != nil {
 		slog.Error("stream error", "error", err, "request_id", c.GetString("request_id"))
 	}
 
 	latency := time.Since(startTime)
-	promptTokens, completionTokens, found := s.streamHandler.GetTokenExtractor().ExtractFromStream(nil)
+	promptTokens, completionTokens, found := streamHandler.GetTokenExtractor().ExtractFromStream(nil)
 
 	var totalTokens int
 	if found {

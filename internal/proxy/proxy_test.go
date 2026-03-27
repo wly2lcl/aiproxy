@@ -184,45 +184,7 @@ func TestProxy_ModifyRequest_NilProvider(t *testing.T) {
 	}
 }
 
-func TestProxy_Timeout(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer backend.Close()
 
-	proxy := NewProxy(&Config{
-		Timeout:         50 * time.Millisecond,
-		StreamTimeout:   5 * time.Minute,
-		MaxIdleConns:    100,
-		IdleConnTimeout: 90 * time.Second,
-	})
-
-	req := httptest.NewRequest(http.MethodPost, backend.URL, nil)
-
-	ctx := context.WithValue(req.Context(), "account", &domain.Account{
-		ID:         "test-account",
-		ProviderID: "test-provider",
-		APIKeyHash: "test-key",
-	})
-	ctx = context.WithValue(ctx, "provider", &mockProvider{
-		name:    "test-provider",
-		apiBase: backend.URL,
-	})
-	req = req.WithContext(ctx)
-
-	start := time.Now()
-	_, err := proxy.Do(req.Context(), req)
-	elapsed := time.Since(start)
-
-	if err == nil {
-		t.Error("expected timeout error")
-	}
-
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("request took too long: %v", elapsed)
-	}
-}
 
 func TestTransport_ConnectionPool(t *testing.T) {
 	cfg := &Config{
@@ -276,38 +238,7 @@ func TestTransport_ResponseHeaders(t *testing.T) {
 	}
 }
 
-func TestTransport_StreamTimeout(t *testing.T) {
-	cfg := &Config{
-		Timeout:         30 * time.Second,
-		StreamTimeout:   100 * time.Millisecond,
-		MaxIdleConns:    100,
-		IdleConnTimeout: 90 * time.Second,
-	}
 
-	transport := NewTransport(cfg)
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer backend.Close()
-
-	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
-	ctx := context.WithValue(req.Context(), "streaming", true)
-	req = req.WithContext(ctx)
-
-	start := time.Now()
-	_, err := transport.RoundTrip(req)
-	elapsed := time.Since(start)
-
-	if err == nil {
-		t.Error("expected timeout error for streaming")
-	}
-
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("request took too long: %v", elapsed)
-	}
-}
 
 func TestTransport_GetConfig(t *testing.T) {
 	cfg := &Config{

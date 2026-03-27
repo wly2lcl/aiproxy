@@ -15,6 +15,7 @@ type TokenExtractor struct {
 		completion int
 		found      bool
 	}
+	estimatedText string
 }
 
 func NewTokenExtractor(charsPerToken int) *TokenExtractor {
@@ -44,7 +45,14 @@ func (e *TokenExtractor) ExtractFromStream(chunk *openai.StreamChunk) (prompt, c
 	if chunk == nil {
 		e.mu.RLock()
 		defer e.mu.RUnlock()
-		return e.lastUsage.prompt, e.lastUsage.completion, e.lastUsage.found
+		if e.lastUsage.found {
+			return e.lastUsage.prompt, e.lastUsage.completion, true
+		}
+		if e.IsHybridMode() && len(e.estimatedText) > 0 {
+			estimated := e.EstimateFromText(e.estimatedText)
+			return 0, estimated, true
+		}
+		return 0, 0, false
 	}
 
 	if chunk.Usage == nil {
@@ -58,6 +66,15 @@ func (e *TokenExtractor) ExtractFromStream(chunk *openai.StreamChunk) (prompt, c
 	e.lastUsage.found = true
 
 	return chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, true
+}
+
+func (e *TokenExtractor) AccumulateText(text string) {
+	if text == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.estimatedText += text
 }
 
 func (e *TokenExtractor) EstimateFromText(text string) int {
@@ -77,4 +94,5 @@ func (e *TokenExtractor) Reset() {
 	e.lastUsage.prompt = 0
 	e.lastUsage.completion = 0
 	e.lastUsage.found = false
+	e.estimatedText = ""
 }

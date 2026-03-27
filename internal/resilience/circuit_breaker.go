@@ -38,6 +38,7 @@ type CircuitBreaker struct {
 	state            State
 	failureCount     int
 	successCount     int
+	halfOpenCount    int
 	failureThreshold int
 	successThreshold int
 	recoveryTimeout  time.Duration
@@ -89,12 +90,21 @@ func (cb *CircuitBreaker) Allow() bool {
 	if cb.state == StateOpen {
 		if time.Since(cb.lastFailureTime) >= cb.recoveryTimeout {
 			cb.transitionToHalfOpen()
+			cb.halfOpenCount++
 			return true
 		}
 		return false
 	}
 
-	return cb.state == StateHalfOpen
+	if cb.state == StateHalfOpen {
+		if cb.halfOpenCount < cb.successThreshold {
+			cb.halfOpenCount++
+			return true
+		}
+		return false
+	}
+
+	return false
 }
 
 func (cb *CircuitBreaker) RecordSuccess() {
@@ -159,6 +169,7 @@ func (cb *CircuitBreaker) transitionToClosed() {
 func (cb *CircuitBreaker) transitionToHalfOpen() {
 	cb.state = StateHalfOpen
 	cb.successCount = 0
+	cb.halfOpenCount = 0
 }
 
 var ErrCircuitOpen = &CircuitBreakerError{}

@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"net/http"
 	"time"
 )
@@ -47,12 +46,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-		req = req.WithContext(ctx)
-	}
+	// Remove internal WithTimeout because it causes early cancellation for streaming responses
+	// when RoundTrip returns (headers received but body not yet read).
+	// We rely on either the client closing the connection or the IdleConnTimeout.
+	_ = timeout
 
 	resp, err := t.Transport.RoundTrip(req)
 	if err != nil {

@@ -13,6 +13,23 @@ type AccountState struct {
 	LastUsedAt          time.Time
 }
 
+func cloneAccount(a *domain.Account) *domain.Account {
+	if a == nil {
+		return nil
+	}
+	acc := *a
+	return &acc
+}
+
+func cloneAccountState(s *AccountState) *AccountState {
+	if s == nil {
+		return nil
+	}
+	state := *s
+	state.Account = cloneAccount(s.Account)
+	return &state
+}
+
 type Pool struct {
 	mu       sync.RWMutex
 	accounts map[string]*AccountState
@@ -69,7 +86,7 @@ func (p *Pool) Get(id string) (*domain.Account, error) {
 	defer p.mu.RUnlock()
 
 	if state, exists := p.accounts[id]; exists {
-		return state.Account, nil
+		return cloneAccount(state.Account), nil
 	}
 	return nil, domain.NewDomainError(domain.ErrCodeAccountNotFound, "account not found")
 }
@@ -81,7 +98,7 @@ func (p *Pool) List() []*domain.Account {
 	accounts := make([]*domain.Account, 0, len(p.accounts))
 	for _, id := range p.order {
 		if state, exists := p.accounts[id]; exists {
-			accounts = append(accounts, state.Account)
+			accounts = append(accounts, cloneAccount(state.Account))
 		}
 	}
 	return accounts
@@ -142,7 +159,7 @@ func (p *Pool) GetState(id string) *AccountState {
 	defer p.mu.RUnlock()
 
 	if state, exists := p.accounts[id]; exists {
-		return state
+		return cloneAccountState(state)
 	}
 	return nil
 }
@@ -157,7 +174,7 @@ func (p *Pool) GetAvailableAccounts() []*AccountState {
 			if state.Account.IsEnabled &&
 				state.Account.Weight > 0 &&
 				state.ConsecutiveFailures < domain.CircuitBreakerThreshold {
-				available = append(available, state)
+				available = append(available, cloneAccountState(state))
 			}
 		}
 	}

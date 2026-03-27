@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/wangluyao/aiproxy/internal/config"
 	"github.com/wangluyao/aiproxy/internal/domain"
 	"github.com/wangluyao/aiproxy/internal/pool"
 	"github.com/wangluyao/aiproxy/internal/stats"
@@ -736,7 +737,7 @@ func setupTestDB(t *testing.T) *storage.SQLite {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	db, err := storage.NewSQLite(dbPath)
+	db, err := storage.NewSQLite(&config.DatabaseConfig{Path: dbPath})
 	if err != nil {
 		t.Fatalf("NewSQLite failed: %v", err)
 	}
