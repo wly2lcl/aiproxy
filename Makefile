@@ -72,7 +72,7 @@ clean:
 # Docker
 docker:
 	@echo "Building Docker image..."
-	docker build -t $(APP_NAME):$(VERSION) -t $(APP_NAME):latest .
+	docker build -t $(APP_NAME):$(VERSION) -t $(APP_NAME):latest -f docker/Dockerfile .
 
 docker-run:
 	@echo "Running Docker container..."
@@ -89,10 +89,10 @@ docker-stop:
 	docker rm $(APP_NAME) || true
 
 docker-compose-up:
-	docker-compose up -d
+	docker compose -f docker/docker-compose.yml up -d
 
 docker-compose-down:
-	docker-compose down
+	docker compose -f docker/docker-compose.yml down
 
 # Database
 migrate-up:

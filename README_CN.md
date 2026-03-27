@@ -35,10 +35,10 @@ cp config/config.example.json config/config.json
 vim config/config.json
 
 # 使用 Docker Compose 启动
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 
 # 查看日志
-docker-compose logs -f
+docker compose -f docker/docker-compose.yml logs -f
 ```
 
 ### 从源码构建
@@ -368,8 +368,11 @@ aiproxy/
 ├── config/
 │   └── config.example.json  # 示例配置
 ├── migrations/              # 数据库迁移
-├── Dockerfile
-└── docker-compose.yaml
+├── docker/
+│   ├── Dockerfile           # Docker 镜像定义
+│   ├── Dockerfile.goreleaser # GoReleaser Docker 镜像
+│   ├── docker-compose.yml   # Docker Compose 配置
+│   └── entrypoint.sh        # Docker 入口脚本
 ```
 
 ## 监控

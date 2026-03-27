@@ -31,7 +31,7 @@ dockers_v2:
     ids:
       - aiproxy
     extra_files:
-      - scripts/docker-entrypoint.sh
+      - docker/entrypoint.sh
       - config/config.example.json
     images:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/aiproxy"

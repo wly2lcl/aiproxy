@@ -8,7 +8,7 @@ RUN apk add --no-cache ca-certificates tzdata wget && \
 WORKDIR /app
 
 COPY $TARGETPLATFORM/aiproxy /app/aiproxy
-COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY docker/entrypoint.sh /app/docker-entrypoint.sh
 COPY config/config.example.json /app/config/config.example.json
 
 RUN chmod +x /app/docker-entrypoint.sh && \

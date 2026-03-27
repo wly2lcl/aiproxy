@@ -35,10 +35,10 @@ cp config/config.example.json config/config.json
 vim config/config.json
 
 # Run with Docker Compose
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 
 # Check logs
-docker-compose logs -f
+docker compose -f docker/docker-compose.yml logs -f
 ```
 
 ### Building from Source
@@ -381,8 +381,11 @@ aiproxy/
 ├── config/
 │   └── config.example.json  # Example configuration
 ├── migrations/              # Database migrations
-├── Dockerfile
-└── docker-compose.yaml
+├── docker/
+│   ├── Dockerfile           # Docker image definition
+│   ├── Dockerfile.goreleaser # GoReleaser Docker image
+│   ├── docker-compose.yml   # Docker Compose configuration
+│   └── entrypoint.sh        # Docker entrypoint script
 ```
 
 ## Monitoring
