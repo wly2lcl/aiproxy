@@ -27,7 +27,7 @@ WORKDIR /app
 
 COPY --from=builder /build/aiproxy /app/aiproxy
 COPY --from=builder /build/config/config.example.json /app/config/config.example.json
-COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY docker/entrypoint.sh /app/docker-entrypoint.sh
 
 RUN chmod +x /app/docker-entrypoint.sh && \
     mkdir -p /app/data && \
