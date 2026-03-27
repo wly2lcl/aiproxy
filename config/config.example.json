@@ -48,7 +48,7 @@
         "HTTP-Referer": "https://your-site.com",
         "X-Title": "Your App Name"
       },
-      "timeout": "120s",
+      "timeout": "300s",
       "stream_timeout": "600s",
       "api_keys": [
         {
@@ -102,7 +102,7 @@
       "is_default": false,
       "is_enabled": true,
       "headers": {},
-      "timeout": "120s",
+      "timeout": "300s",
       "stream_timeout": "600s",
       "api_keys": [
         {
@@ -153,7 +153,7 @@
       "is_default": false,
       "is_enabled": true,
       "headers": {},
-      "timeout": "120s",
+      "timeout": "300s",
       "stream_timeout": "600s",
       "api_keys": [
         {

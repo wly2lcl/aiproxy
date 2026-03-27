@@ -669,6 +669,15 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 
 		resp, err := s.httpClient.Do(httpReq.WithContext(ctx))
 		if err != nil {
+			slog.Error("upstream request failed",
+				"error", err.Error(),
+				"error_type", fmt.Sprintf("%T", err),
+				"provider", providerName,
+				"model", mappedModel,
+				"account_id", account.ID[:8],
+				"timeout", timeout,
+				"attempt", attempt,
+			)
 			s.statsCollector.RecordError(providerName, mappedModel, "request_failed")
 			s.recordAccountFailure(account.ID)
 			lastErr = err
