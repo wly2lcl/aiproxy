@@ -123,6 +123,8 @@ func (s *Server) run(configPath string) error {
 
 	s.initHTTPClient()
 
+	s.startCleanupTask()
+
 	publicServer, err := s.setupPublicAPI()
 	if err != nil {
 		return fmt.Errorf("failed to setup public API: %w", err)
@@ -252,13 +254,13 @@ func (s *Server) initProviders() error {
 		var p provider.Provider
 		switch pc.Name {
 		case "openai":
-			p = provider.NewOpenAIProvider(pc.APIKeys[0].Key, nil, pc.Models)
+			p = provider.NewOpenAIProvider(pc.APIKeys[0].Key, nil, pc.Models, pc.Headers)
 		case "openrouter":
 			p = provider.NewOpenRouterProvider(pc.APIKeys[0].Key, nil, pc.Models, pc.Headers)
 		case "groq":
-			p = provider.NewGroqProvider(pc.APIKeys[0].Key, nil, pc.Models)
+			p = provider.NewGroqProvider(pc.APIKeys[0].Key, nil, pc.Models, pc.Headers)
 		default:
-			openaiProvider := provider.NewOpenAIProvider(pc.APIKeys[0].Key, nil, pc.Models)
+			openaiProvider := provider.NewOpenAIProvider(pc.APIKeys[0].Key, nil, pc.Models, pc.Headers)
 			openaiProvider.SetAPIBase(pc.APIBase)
 			openaiProvider.SetName(pc.Name)
 			p = openaiProvider
@@ -337,6 +339,7 @@ func (s *Server) initAccountPool(pc config.ProviderConfig) error {
 		// Initialize circuit breaker for each account
 		s.circuitBreakers[account.ID] = resilience.NewCircuitBreaker(&resilience.CircuitBreakerConfig{
 			FailureThreshold: pc.CircuitBreaker.Threshold,
+			SuccessThreshold: pc.CircuitBreaker.HalfOpenRequests,
 			RecoveryTimeout:  parseDuration(pc.CircuitBreaker.Timeout, 60*time.Second),
 		})
 	}
@@ -373,7 +376,8 @@ func (s *Server) initAccountLimiter(accountID string, limits *domain.AccountLimi
 		limiters = append(limiters, limiter.NewDaily(s.storage, *limits.Daily))
 	}
 	if limits.Window5h != nil && *limits.Window5h > 0 {
-		limiters = append(limiters, limiter.NewWindow5h(s.storage, *limits.Window5h))
+		windowDuration := parseDuration(s.config.RateLimits.Window5hDuration, 5*time.Hour)
+		limiters = append(limiters, limiter.NewWindow5hWithDuration(s.storage, *limits.Window5h, windowDuration))
 	}
 	if limits.Monthly != nil && *limits.Monthly > 0 {
 		limiters = append(limiters, limiter.NewMonthly(s.storage, *limits.Monthly))
@@ -403,8 +407,29 @@ func parseDuration(s string, defaultVal time.Duration) time.Duration {
 
 func (s *Server) initStats() {
 	s.statsCollector = stats.NewCollector()
-	s.statsReporter = stats.NewReporter(s.statsCollector)
-	slog.Info("initialized stats collector")
+	s.statsReporter = stats.NewReporterWithNamespace(s.statsCollector, s.config.Metrics.Namespace)
+	slog.Info("initialized stats collector", "namespace", s.config.Metrics.Namespace)
+}
+
+func (s *Server) startCleanupTask() {
+	cleanupInterval := parseDuration(s.config.RateLimits.CleanupInterval, time.Hour)
+	if cleanupInterval <= 0 {
+		cleanupInterval = time.Hour
+	}
+
+	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+
+		slog.Info("started rate limit cleanup task", "interval", cleanupInterval)
+
+		for range ticker.C {
+			ctx := context.Background()
+			if err := s.storage.CleanupExpiredRateLimits(ctx); err != nil {
+				slog.Error("failed to cleanup expired rate limits", "error", err)
+			}
+		}
+	}()
 }
 
 func (s *Server) initProxy() {
@@ -420,9 +445,17 @@ func (s *Server) initProxy() {
 		IdleConnTimeout: 90 * time.Second,
 	})
 
-	s.streamHandler = proxy.NewStreamHandler(s.proxy)
+	charsPerToken := s.config.TokenTracking.EstimationCharsPerToken
+	if charsPerToken <= 0 {
+		charsPerToken = 4
+	}
+	streamingMode := s.config.TokenTracking.StreamingMode
+	if streamingMode == "" {
+		streamingMode = "hybrid"
+	}
+	s.streamHandler = proxy.NewStreamHandlerWithConfig(s.proxy, charsPerToken, streamingMode)
 
-	slog.Info("initialized proxy")
+	slog.Info("initialized proxy", "chars_per_token", charsPerToken, "streaming_mode", streamingMode)
 }
 
 func (s *Server) initHTTPClient() {
@@ -662,18 +695,22 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 
 	maxAttempts := 1
 	if retry != nil {
-		maxAttempts = 3
+		maxAttempts = retry.GetMaxAttempts()
 	}
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
-			delay := time.Second << time.Duration(attempt-2)
+			// Use configured retry delay
+			delay := time.Second
+			if retry != nil {
+				delay = retry.CalculateDelay(attempt)
+			}
 			select {
 			case <-c.Request.Context().Done():
 				return nil, nil, c.Request.Context().Err()
 			case <-time.After(delay):
 			}
-			slog.Info("retrying request", "attempt", attempt, "provider", providerName, "account_id", account.ID[:8])
+			slog.Info("retrying request", "attempt", attempt, "delay", delay, "provider", providerName, "account_id", account.ID[:8])
 		}
 
 		httpReq, err := prov.TransformRequest(req, account.APIKeyHash)

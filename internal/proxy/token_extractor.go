@@ -8,7 +8,7 @@ import (
 
 type TokenExtractor struct {
 	charsPerToken int
-	hybridMode    bool
+	streamingMode string
 	mu            sync.RWMutex
 	lastUsage     struct {
 		prompt     int
@@ -23,7 +23,20 @@ func NewTokenExtractor(charsPerToken int) *TokenExtractor {
 	}
 	return &TokenExtractor{
 		charsPerToken: charsPerToken,
-		hybridMode:    true,
+		streamingMode: "hybrid",
+	}
+}
+
+func NewTokenExtractorWithConfig(charsPerToken int, streamingMode string) *TokenExtractor {
+	if charsPerToken <= 0 {
+		charsPerToken = 4
+	}
+	if streamingMode == "" {
+		streamingMode = "hybrid"
+	}
+	return &TokenExtractor{
+		charsPerToken: charsPerToken,
+		streamingMode: streamingMode,
 	}
 }
 
@@ -55,7 +68,7 @@ func (e *TokenExtractor) EstimateFromText(text string) int {
 }
 
 func (e *TokenExtractor) IsHybridMode() bool {
-	return e.hybridMode
+	return e.streamingMode == "hybrid" || e.streamingMode == ""
 }
 
 func (e *TokenExtractor) Reset() {

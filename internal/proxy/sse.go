@@ -22,6 +22,13 @@ func NewStreamHandler(proxy *Proxy) *StreamHandler {
 	}
 }
 
+func NewStreamHandlerWithConfig(proxy *Proxy, charsPerToken int, streamingMode string) *StreamHandler {
+	return &StreamHandler{
+		proxy:          proxy,
+		tokenExtractor: NewTokenExtractorWithConfig(charsPerToken, streamingMode),
+	}
+}
+
 type flushWriter struct {
 	w       http.ResponseWriter
 	flusher http.Flusher

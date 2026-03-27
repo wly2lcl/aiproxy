@@ -19,23 +19,35 @@ const (
 
 type GroqProvider struct {
 	BaseProvider
-	apiKey string
+	apiKey       string
+	extraHeaders map[string]string
 }
 
-func NewGroqProvider(apiKey string, config *domain.ProviderConfig, models []string) *GroqProvider {
+func NewGroqProvider(apiKey string, config *domain.ProviderConfig, models []string, extraHeaders ...map[string]string) *GroqProvider {
+	headers := map[string]string{
+		"Content-Type": "application/json",
+	}
+
+	var extra map[string]string
+	if len(extraHeaders) > 0 {
+		extra = extraHeaders[0]
+		for k, v := range extra {
+			headers[k] = v
+		}
+	}
+
 	return &GroqProvider{
 		BaseProvider: BaseProvider{
-			name:    "groq",
-			apiBase: GroqBaseURL,
-			models:  models,
-			config:  config,
-			headers: map[string]string{
-				"Content-Type": "application/json",
-			},
+			name:     "groq",
+			apiBase:  GroqBaseURL,
+			models:   models,
+			config:   config,
+			headers:  headers,
 			timeout:  DefaultTimeout,
 			timeoutS: DefaultStreamTimeout,
 		},
-		apiKey: apiKey,
+		apiKey:       apiKey,
+		extraHeaders: extra,
 	}
 }
 

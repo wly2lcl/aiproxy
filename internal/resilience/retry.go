@@ -78,6 +78,14 @@ func (r *Retry) calculateDelay(attempt int) time.Duration {
 	return time.Duration(delay)
 }
 
+func (r *Retry) GetMaxAttempts() int {
+	return r.config.MaxAttempts
+}
+
+func (r *Retry) CalculateDelay(attempt int) time.Duration {
+	return r.calculateDelay(attempt)
+}
+
 func (r *Retry) IsRetryableError(err error, status int) bool {
 	if err == nil {
 		return false

@@ -46,5 +46,7 @@ type Storage interface {
 	RecordTokenUsage(ctx context.Context, usage *TokenUsage) error
 	GetTokenUsage(ctx context.Context, accountID string, since time.Time) (*TokenUsageSummary, error)
 
+	CleanupExpiredRateLimits(ctx context.Context) error
+
 	Close() error
 }

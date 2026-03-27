@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/wangluyao/aiproxy/internal/domain"
@@ -410,4 +411,22 @@ func (s *SQLite) GetTokenUsage(ctx context.Context, accountID string, since time
 	}
 
 	return &summary, nil
+}
+
+func (s *SQLite) CleanupExpiredRateLimits(ctx context.Context) error {
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	result, err := s.db.ExecContext(ctx,
+		"DELETE FROM account_limits WHERE window_end < ?",
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired rate limits: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		slog.Info("cleaned up expired rate limits", "count", rowsAffected)
+	}
+
+	return nil
 }

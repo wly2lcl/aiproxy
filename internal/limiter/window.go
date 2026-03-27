@@ -31,6 +31,18 @@ func NewWindow5h(store storage.Storage, max int) *Window5h {
 	}
 }
 
+func NewWindow5hWithDuration(store storage.Storage, max int, windowDuration time.Duration) *Window5h {
+	if windowDuration <= 0 {
+		windowDuration = 5 * time.Hour
+	}
+	return &Window5h{
+		store:    store,
+		max:      max,
+		windows:  make(map[string]*rollingWindow),
+		windowSz: windowDuration,
+	}
+}
+
 func (w *Window5h) Allow(ctx context.Context, key string) (bool, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

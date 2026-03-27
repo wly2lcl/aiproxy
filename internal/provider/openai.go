@@ -15,23 +15,35 @@ import (
 
 type OpenAIProvider struct {
 	BaseProvider
-	apiKey string
+	apiKey       string
+	extraHeaders map[string]string
 }
 
-func NewOpenAIProvider(apiKey string, config *domain.ProviderConfig, models []string) *OpenAIProvider {
+func NewOpenAIProvider(apiKey string, config *domain.ProviderConfig, models []string, extraHeaders ...map[string]string) *OpenAIProvider {
+	headers := map[string]string{
+		"Content-Type": "application/json",
+	}
+
+	var extra map[string]string
+	if len(extraHeaders) > 0 {
+		extra = extraHeaders[0]
+		for k, v := range extra {
+			headers[k] = v
+		}
+	}
+
 	return &OpenAIProvider{
 		BaseProvider: BaseProvider{
-			name:    "openai",
-			apiBase: "https://api.openai.com/v1",
-			models:  models,
-			config:  config,
-			headers: map[string]string{
-				"Content-Type": "application/json",
-			},
+			name:     "openai",
+			apiBase:  "https://api.openai.com/v1",
+			models:   models,
+			config:   config,
+			headers:  headers,
 			timeout:  DefaultTimeout,
 			timeoutS: DefaultStreamTimeout,
 		},
-		apiKey: apiKey,
+		apiKey:       apiKey,
+		extraHeaders: extra,
 	}
 }
 

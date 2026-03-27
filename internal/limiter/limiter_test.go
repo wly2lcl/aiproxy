@@ -118,6 +118,10 @@ func (m *mockStorage) Close() error {
 	return nil
 }
 
+func (m *mockStorage) CleanupExpiredRateLimits(ctx context.Context) error {
+	return nil
+}
+
 func TestRPM_Allow_UnderLimit(t *testing.T) {
 	store := newMockStorage()
 	limiter := NewRPM(store, 10)
