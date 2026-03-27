@@ -37,19 +37,20 @@ var (
 )
 
 type Server struct {
-	config          *config.Config
-	storage         storage.Storage
-	registry        *provider.Registry
-	router          *router.Router
-	proxy           *proxy.Proxy
-	streamHandler   *proxy.StreamHandler
-	statsCollector  *stats.Collector
-	statsReporter   *stats.Reporter
-	accountPools    map[string]*pool.Pool
-	selectors       map[string]*pool.WeightedRoundRobin
-	limiters        map[string]*limiter.CompositeLimiter
-	retries         map[string]*resilience.Retry
-	circuitBreakers map[string]*resilience.CircuitBreaker
+	config              *config.Config
+	storage             storage.Storage
+	registry            *provider.Registry
+	router              *router.Router
+	proxy               *proxy.Proxy
+	streamHandler       *proxy.StreamHandler
+	statsCollector      *stats.Collector
+	statsReporter       *stats.Reporter
+	accountPools        map[string]*pool.Pool
+	selectors           map[string]*pool.WeightedRoundRobin
+	limiters            map[string]*limiter.CompositeLimiter
+	retries             map[string]*resilience.Retry
+	circuitBreakers     map[string]*resilience.CircuitBreaker
+	maxResponseBodySize int64
 }
 
 func main() {
@@ -94,6 +95,11 @@ func (s *Server) run(configPath string) error {
 	}
 
 	s.config = cfg
+
+	s.maxResponseBodySize = cfg.Server.MaxResponseBodySize
+	if s.maxResponseBodySize <= 0 {
+		s.maxResponseBodySize = 50 * 1024 * 1024
+	}
 
 	if err := s.initLogging(); err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
@@ -727,14 +733,27 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 		}
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	limitedReader := io.LimitReader(resp.Body, s.maxResponseBodySize+1)
+	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		slog.Error("failed to read response body", "error", err, "request_id", c.GetString("request_id"))
-		c.JSON(http.StatusInternalServerError, openai.ErrorResponse{
+		c.JSON(http.StatusBadGateway, openai.ErrorResponse{
 			Error: openai.ErrorDetail{
-				Message: "failed to read response",
-				Type:    "internal_error",
+				Message: "failed to read upstream response: " + err.Error(),
+				Type:    "upstream_error",
 				Code:    "read_error",
+			},
+		})
+		return
+	}
+
+	if int64(len(bodyBytes)) > s.maxResponseBodySize {
+		slog.Error("response too large", "size", len(bodyBytes), "limit", s.maxResponseBodySize, "request_id", c.GetString("request_id"))
+		c.JSON(http.StatusBadGateway, openai.ErrorResponse{
+			Error: openai.ErrorDetail{
+				Message: "upstream response exceeds maximum size limit",
+				Type:    "upstream_error",
+				Code:    "response_too_large",
 			},
 		})
 		return
@@ -759,7 +778,8 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 }
 
 func (s *Server) forwardUpstreamError(c *gin.Context, resp *http.Response) {
-	bodyBytes, err := io.ReadAll(resp.Body)
+	limitedReader := io.LimitReader(resp.Body, 64*1024)
+	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
 		c.JSON(resp.StatusCode, openai.ErrorResponse{
 			Error: openai.ErrorDetail{

@@ -12,6 +12,7 @@ type ServerConfig struct {
 	IdleTimeout             string `json:"idle_timeout"`
 	GracefulShutdownTimeout string `json:"graceful_shutdown_timeout"`
 	MaxRequestBodySize      int64  `json:"max_request_body_size"`
+	MaxResponseBodySize     int64  `json:"max_response_body_size"` // Maximum response body size in bytes (default: 50MB)
 }
 
 type DatabaseConfig struct {

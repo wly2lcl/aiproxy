@@ -20,27 +20,29 @@ import (
 )
 
 type ChatConfig struct {
-	Pool      *pool.Pool
-	Router    *router.Router
-	Proxy     *proxy.Proxy
-	Limiter   *limiter.CompositeLimiter
-	Collector *stats.Collector
-	Logger    interface {
+	Pool                *pool.Pool
+	Router              *router.Router
+	Proxy               *proxy.Proxy
+	Limiter             *limiter.CompositeLimiter
+	Collector           *stats.Collector
+	MaxResponseBodySize int64
+	Logger              interface {
 		Info(msg string, fields ...interface{})
 		Error(msg string, fields ...interface{})
 	}
 }
 
 type ChatHandler struct {
-	pool           *pool.Pool
-	router         *router.Router
-	proxy          *proxy.Proxy
-	limiter        *limiter.CompositeLimiter
-	collector      *stats.Collector
-	logger         Logger
-	selector       *pool.WeightedRoundRobin
-	streamHandler  *proxy.StreamHandler
-	tokenExtractor *proxy.TokenExtractor
+	pool                *pool.Pool
+	router              *router.Router
+	proxy               *proxy.Proxy
+	limiter             *limiter.CompositeLimiter
+	collector           *stats.Collector
+	logger              Logger
+	selector            *pool.WeightedRoundRobin
+	streamHandler       *proxy.StreamHandler
+	tokenExtractor      *proxy.TokenExtractor
+	maxResponseBodySize int64
 }
 
 func NewChatHandler(cfg *ChatConfig) *ChatHandler {
@@ -53,15 +55,21 @@ func NewChatHandler(cfg *ChatConfig) *ChatHandler {
 		selector = pool.NewWeightedRoundRobin(cfg.Pool, cfg.Limiter)
 	}
 
+	maxResponseBodySize := cfg.MaxResponseBodySize
+	if maxResponseBodySize <= 0 {
+		maxResponseBodySize = 50 * 1024 * 1024
+	}
+
 	return &ChatHandler{
-		pool:          cfg.Pool,
-		router:        cfg.Router,
-		proxy:         cfg.Proxy,
-		limiter:       cfg.Limiter,
-		collector:     cfg.Collector,
-		logger:        cfg.Logger,
-		selector:      selector,
-		streamHandler: proxy.NewStreamHandler(cfg.Proxy),
+		pool:                cfg.Pool,
+		router:              cfg.Router,
+		proxy:               cfg.Proxy,
+		limiter:             cfg.Limiter,
+		collector:           cfg.Collector,
+		logger:              cfg.Logger,
+		selector:            selector,
+		streamHandler:       proxy.NewStreamHandler(cfg.Proxy),
+		maxResponseBodySize: maxResponseBodySize,
 	}
 }
 
@@ -212,9 +220,15 @@ func (h *ChatHandler) handleNonStream(c *gin.Context, resp *http.Response, accou
 		}
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	limitedReader := io.LimitReader(resp.Body, h.maxResponseBodySize+1)
+	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
-		h.sendError(c, http.StatusInternalServerError, "read_error", "failed to read response")
+		h.sendError(c, http.StatusBadGateway, "upstream_error", "failed to read upstream response: "+err.Error())
+		return
+	}
+
+	if int64(len(bodyBytes)) > h.maxResponseBodySize {
+		h.sendError(c, http.StatusBadGateway, "response_too_large", "upstream response exceeds maximum size limit")
 		return
 	}
 
