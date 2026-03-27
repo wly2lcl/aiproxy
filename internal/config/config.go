@@ -122,6 +122,14 @@ type RequestIDConfig struct {
 	GenerateIfMissing bool   `json:"generate_if_missing"`
 }
 
+type HTTPTransportConfig struct {
+	IdleConnTimeout       string `json:"idle_conn_timeout"`
+	ResponseHeaderTimeout string `json:"response_header_timeout"`
+	DisableKeepAlives     bool   `json:"disable_keep_alives"`
+	MaxIdleConns          int    `json:"max_idle_conns"`
+	MaxIdleConnsPerHost   int    `json:"max_idle_conns_per_host"`
+}
+
 type Config struct {
 	Server        ServerConfig        `json:"server"`
 	Database      DatabaseConfig      `json:"database"`
@@ -135,4 +143,5 @@ type Config struct {
 	TokenTracking TokenTrackingConfig `json:"token_tracking"`
 	RateLimits    RateLimitsConfig    `json:"rate_limits"`
 	RequestID     RequestIDConfig     `json:"request_id"`
+	HTTPTransport HTTPTransportConfig `json:"http_transport"`
 }

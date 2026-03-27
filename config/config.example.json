@@ -224,5 +224,12 @@
   "request_id": {
     "header_name": "X-Request-ID",
     "generate_if_missing": true
+  },
+  "http_transport": {
+    "idle_conn_timeout": "300s",
+    "response_header_timeout": "10m",
+    "disable_keep_alives": true,
+    "max_idle_conns": 100,
+    "max_idle_conns_per_host": 20
   }
 }

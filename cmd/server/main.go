@@ -426,22 +426,40 @@ func (s *Server) initProxy() {
 }
 
 func (s *Server) initHTTPClient() {
+	cfg := s.config.HTTPTransport
+
+	idleConnTimeout := parseDuration(cfg.IdleConnTimeout, 300*time.Second)
+	responseHeaderTimeout := parseDuration(cfg.ResponseHeaderTimeout, 10*time.Minute)
+	maxIdleConns := cfg.MaxIdleConns
+	if maxIdleConns <= 0 {
+		maxIdleConns = 100
+	}
+	maxIdleConnsPerHost := cfg.MaxIdleConnsPerHost
+	if maxIdleConnsPerHost <= 0 {
+		maxIdleConnsPerHost = 20
+	}
+
 	s.httpClient = &http.Client{
 		Timeout: 10 * time.Minute,
 		Transport: &http.Transport{
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   20,
-			MaxConnsPerHost:       50,
-			IdleConnTimeout:       120 * time.Second,
-			DisableCompression:    false,
-			DisableKeepAlives:     false,
+			MaxIdleConns:          maxIdleConns,
+			MaxIdleConnsPerHost:   maxIdleConnsPerHost,
+			MaxConnsPerHost:       maxIdleConns,
+			IdleConnTimeout:       idleConnTimeout,
+			DisableKeepAlives:     cfg.DisableKeepAlives,
 			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 5 * time.Minute,
+			ResponseHeaderTimeout: responseHeaderTimeout,
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
 
-	slog.Info("initialized HTTP client with connection pooling")
+	slog.Info("initialized HTTP client",
+		"disable_keep_alives", cfg.DisableKeepAlives,
+		"idle_conn_timeout", idleConnTimeout,
+		"response_header_timeout", responseHeaderTimeout,
+		"max_idle_conns", maxIdleConns,
+		"max_idle_conns_per_host", maxIdleConnsPerHost,
+	)
 }
 
 func (s *Server) setupPublicAPI() (*http.Server, error) {
