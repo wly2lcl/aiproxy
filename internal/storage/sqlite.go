@@ -289,40 +289,15 @@ func (s *SQLite) IncrementRateLimit(ctx context.Context, accountID string, limit
 		return fmt.Errorf("unknown limit type: %s", limitType)
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO account_limits (account_id, limit_type, max_value, current_value, window_start, window_end) 
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(account_id, limit_type, window_start) 
+		 DO UPDATE SET current_value = current_value + excluded.current_value, last_updated = datetime('now')`,
+		accountID, string(limitType), 0, delta, windowStart.Format("2006-01-02 15:04:05"), windowEnd.Format("2006-01-02 15:04:05"),
+	)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	var currentValue int
-	err = tx.QueryRowContext(ctx,
-		"SELECT current_value FROM account_limits WHERE account_id = ? AND limit_type = ? AND window_start = ?",
-		accountID, string(limitType), windowStart.Format("2006-01-02 15:04:05"),
-	).Scan(&currentValue)
-
-	if err == sql.ErrNoRows {
-		_, err = tx.ExecContext(ctx,
-			"INSERT INTO account_limits (account_id, limit_type, max_value, current_value, window_start, window_end) VALUES (?, ?, ?, ?, ?, ?)",
-			accountID, string(limitType), 0, delta, windowStart.Format("2006-01-02 15:04:05"), windowEnd.Format("2006-01-02 15:04:05"),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert rate limit: %w", err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("failed to get current rate limit: %w", err)
-	} else {
-		_, err = tx.ExecContext(ctx,
-			"UPDATE account_limits SET current_value = ?, last_updated = datetime('now') WHERE account_id = ? AND limit_type = ? AND window_start = ?",
-			currentValue+delta, accountID, string(limitType), windowStart.Format("2006-01-02 15:04:05"),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to update rate limit: %w", err)
-		}
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to upsert rate limit: %w", err)
 	}
 
 	return nil
