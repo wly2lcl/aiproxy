@@ -27,9 +27,12 @@ builds:
 
 dockers_v2:
   - id: aiproxy
-    dockerfile: Dockerfile
+    dockerfile: docker/Dockerfile.goreleaser
     ids:
       - aiproxy
+    extra_files:
+      - scripts/docker-entrypoint.sh
+      - config/config.example.json
     images:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/aiproxy"
     tags:
