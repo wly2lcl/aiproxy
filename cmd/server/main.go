@@ -51,6 +51,7 @@ type Server struct {
 	retries             map[string]*resilience.Retry
 	circuitBreakers     map[string]*resilience.CircuitBreaker
 	maxResponseBodySize int64
+	httpClient          *http.Client
 }
 
 func main() {
@@ -119,6 +120,8 @@ func (s *Server) run(configPath string) error {
 	s.initStats()
 
 	s.initProxy()
+
+	s.initHTTPClient()
 
 	publicServer, err := s.setupPublicAPI()
 	if err != nil {
@@ -413,6 +416,25 @@ func (s *Server) initProxy() {
 	slog.Info("initialized proxy")
 }
 
+func (s *Server) initHTTPClient() {
+	s.httpClient = &http.Client{
+		Timeout: 10 * time.Minute,
+		Transport: &http.Transport{
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   20,
+			MaxConnsPerHost:       50,
+			IdleConnTimeout:       120 * time.Second,
+			DisableCompression:    false,
+			DisableKeepAlives:     false,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 5 * time.Minute,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+
+	slog.Info("initialized HTTP client with connection pooling")
+}
+
 func (s *Server) setupPublicAPI() (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
@@ -632,11 +654,11 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			return nil, nil, err
 		}
 
-		client := &http.Client{
-			Timeout: prov.GetTimeout(req.Stream),
-		}
+		timeout := prov.GetTimeout(req.Stream)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		defer cancel()
 
-		resp, err := client.Do(httpReq.WithContext(c.Request.Context()))
+		resp, err := s.httpClient.Do(httpReq.WithContext(ctx))
 		if err != nil {
 			s.statsCollector.RecordError(providerName, mappedModel, "request_failed")
 			s.recordAccountFailure(account.ID)
