@@ -264,6 +264,15 @@ func (s *Server) initProviders() error {
 			p = openaiProvider
 		}
 
+		if timeoutSetter, ok := p.(interface {
+			SetTimeout(time.Duration, time.Duration)
+		}); ok {
+			timeout := parseDuration(pc.Timeout, 120*time.Second)
+			streamTimeout := parseDuration(pc.StreamTimeout, 600*time.Second)
+			timeoutSetter.SetTimeout(timeout, streamTimeout)
+			slog.Info("set provider timeout", "provider", pc.Name, "timeout", timeout, "stream_timeout", streamTimeout)
+		}
+
 		if err := s.registry.Register(p); err != nil {
 			slog.Warn("failed to register provider", "provider", pc.Name, "error", err)
 			continue
