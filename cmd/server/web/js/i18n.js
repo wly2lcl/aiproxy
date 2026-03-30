@@ -31,7 +31,12 @@ const translations = {
     tokens: 'Token数', ttft: 'TTFT', latency: '延迟', error: '错误', streaming: '流式',
     version: '版本', buildTime: '构建时间', modelMapping: '模型映射', sourceModel: '源模型', targetModel: '目标模型',
     recentLogs: '最近请求', noLogs: '暂无请求日志', providerStats: '服务商统计', availableAccounts: '可用账号',
-    circuitOpenAccounts: '熔断账号', requestLog: '请求日志', timestamp: '时间', requestID: '请求ID'
+    circuitOpenAccounts: '熔断账号', requestLog: '请求日志', timestamp: '时间', requestID: '请求ID',
+    requestTrend: '请求趋势', tokenTrend: 'Token趋势', last24h: '最近24小时', last7d: '最近7天', last30d: '最近30天',
+    accountStats: '账号统计', modelStats: '模型统计', successRate: '成功率', totalTokensUsed: '总Token使用',
+    batchEnable: '批量启用', batchDisable: '批量禁用', batchReset: '批量重置', selectedCount: '已选择',
+    selectAll: '全选', exportCSV: '导出CSV', exportAccounts: '导出账号', exportModels: '导出模型', exportStats: '导出统计',
+    requestDetail: '请求详情', viewDetail: '查看详情', hourly: '按小时', daily: '按天'
   },
   en: {
     dashboard: 'Dashboard', accounts: 'Accounts', providers: 'Providers', stats: 'Stats', settings: 'Settings', logs: 'Request Logs',
@@ -65,6 +70,11 @@ const translations = {
     tokens: 'Tokens', ttft: 'TTFT', latency: 'Latency', error: 'Error', streaming: 'Streaming',
     version: 'Version', buildTime: 'Build Time', modelMapping: 'Model Mapping', sourceModel: 'Source Model', targetModel: 'Target Model',
     recentLogs: 'Recent Requests', noLogs: 'No request logs', providerStats: 'Provider Stats', availableAccounts: 'Available Accounts',
-    circuitOpenAccounts: 'Circuit Open Accounts', requestLog: 'Request Log', timestamp: 'Timestamp', requestID: 'Request ID'
+    circuitOpenAccounts: 'Circuit Open Accounts', requestLog: 'Request Log', timestamp: 'Timestamp', requestID: 'Request ID',
+    requestTrend: 'Request Trend', tokenTrend: 'Token Trend', last24h: 'Last 24 Hours', last7d: 'Last 7 Days', last30d: 'Last 30 Days',
+    accountStats: 'Account Stats', modelStats: 'Model Stats', successRate: 'Success Rate', totalTokensUsed: 'Total Tokens',
+    batchEnable: 'Batch Enable', batchDisable: 'Batch Disable', batchReset: 'Batch Reset', selectedCount: 'Selected',
+    selectAll: 'Select All', exportCSV: 'Export CSV', exportAccounts: 'Export Accounts', exportModels: 'Export Models', exportStats: 'Export Stats',
+    requestDetail: 'Request Detail', viewDetail: 'View Detail', hourly: 'Hourly', daily: 'Daily'
   }
 }

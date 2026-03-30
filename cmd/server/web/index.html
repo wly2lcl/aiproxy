@@ -102,6 +102,29 @@
     </div>
   </div>
 
+  <!-- Log Detail Modal -->
+  <div v-if="logDetailModal.show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div class="bg-gray-800 rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl">
+      <div class="flex justify-between items-start mb-4">
+        <h3 class="text-lg font-semibold">{{ t('requestDetail') }}</h3>
+        <button @click="logDetailModal.show=false" class="text-gray-400 hover:text-white">✕</button>
+      </div>
+      <div v-if="logDetailModal.log" class="space-y-2 text-sm">
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('requestID') }}</span><span class="font-mono">{{ logDetailModal.log.RequestID }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('timestamp') }}</span><span>{{ formatDate(logDetailModal.log.Timestamp) }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('model') }}</span><span class="font-mono">{{ logDetailModal.log.Model }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('provider') }}</span><span>{{ logDetailModal.log.ProviderID }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('status') }}</span><span :class="logDetailModal.log.Status<400?'text-green-400':'text-red-400'">{{ logDetailModal.log.Status }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('tokens') }}</span><span>{{ logDetailModal.log.Tokens }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('ttft') }}</span><span>{{ formatDuration(logDetailModal.log.TTFTMs) }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('latency') }}</span><span>{{ formatDuration(logDetailModal.log.LatencyMs) }}</span></div>
+        <div class="flex justify-between p-2 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('streaming') }}</span><span>{{ logDetailModal.log.IsStreaming?t('yes'):t('no') }}</span></div>
+        <div v-if="logDetailModal.log.ErrorType" class="p-2 bg-red-900/30 rounded"><span class="text-gray-400">{{ t('error') }}:</span><span class="text-red-400 ml-2">{{ logDetailModal.log.ErrorType }}</span></div>
+      </div>
+      <div class="flex justify-end mt-4"><button @click="logDetailModal.show=false" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg">{{ t('close') }}</button></div>
+    </div>
+  </div>
+
   <!-- Layout -->
   <div class="flex h-screen">
     <!-- Sidebar -->
@@ -161,6 +184,10 @@
         <div v-if="currentView==='accounts'">
           <div class="flex flex-wrap gap-2 mb-4 items-center">
             <button @click="openAddAccountModal" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg flex items-center gap-2">+ {{ t('addAccount') }}</button>
+            <span v-if="selectedAccounts.length" class="px-3 py-2 bg-blue-900/50 text-blue-300 rounded-lg text-sm">{{ selectedAccounts.length }} {{ t('selectedCount') }}</span>
+            <button v-if="selectedAccounts.length" @click="batchOperation('enable')" class="px-3 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded-lg text-sm">{{ t('batchEnable') }}</button>
+            <button v-if="selectedAccounts.length" @click="batchOperation('disable')" class="px-3 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded-lg text-sm">{{ t('batchDisable') }}</button>
+            <button v-if="selectedAccounts.length" @click="batchOperation('reset')" class="px-3 py-2 bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 rounded-lg text-sm">{{ t('batchReset') }}</button>
             <select v-model="accountFilter.provider" class="px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 text-sm"><option value="">{{ t('all') }} {{ t('provider') }}</option><option v-for="p in providerList" :key="p" :value="p">{{ p }}</option></select>
             <select v-model="accountFilter.status" class="px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 text-sm"><option value="">{{ t('all') }} {{ t('status') }}</option><option value="enabled">{{ t('enabled') }}</option><option value="disabled">{{ t('disabled') }}</option></select>
             <select v-model="accountFilter.available" class="px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 text-sm"><option value="">{{ t('all') }} {{ t('available') }}</option><option value="true">{{ t('available') }}</option><option value="false">{{ t('unavailable') }}</option></select>
@@ -169,6 +196,7 @@
           <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-x-auto">
             <table class="w-full text-sm">
               <thead class="bg-gray-700/50"><tr>
+                <th class="px-4 py-3 text-left text-gray-400 w-8"><input type="checkbox" @change="toggleSelectAll" :checked="selectedAccounts.length===filteredAccounts.length && filteredAccounts.length>0" class="w-4 h-4 rounded bg-gray-700 border-gray-600"></th>
                 <th class="px-4 py-3 text-left text-gray-400">{{ t('id') }}</th>
                 <th class="px-4 py-3 text-left text-gray-400">{{ t('provider') }}</th>
                 <th class="px-4 py-3 text-left text-gray-400">{{ t('status') }}</th>
@@ -179,9 +207,10 @@
                 <th class="px-4 py-3 text-left text-gray-400">{{ t('actions') }}</th>
               </tr></thead>
               <tbody class="divide-y divide-gray-700">
-                <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td></tr>
-                <tr v-else-if="!filteredAccounts.length"><td colspan="8" class="px-4 py-8 text-center text-gray-400">{{ t('noAccounts') }}</td></tr>
-                <tr v-for="a in filteredAccounts" :key="a.id" class="hover:bg-gray-700/30">
+                <tr v-if="loading"><td colspan="9" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td></tr>
+                <tr v-else-if="!filteredAccounts.length"><td colspan="9" class="px-4 py-8 text-center text-gray-400">{{ t('noAccounts') }}</td></tr>
+                <tr v-for="a in filteredAccounts" :key="a.id" :class="['hover:bg-gray-700/30', selectedAccounts.includes(a.id)?'bg-blue-900/20':'']">
+                  <td class="px-4 py-3"><input type="checkbox" :checked="selectedAccounts.includes(a.id)" @change="toggleSelectAccount(a.id)" class="w-4 h-4 rounded bg-gray-700 border-gray-600"></td>
                   <td class="px-4 py-3 font-mono text-xs">{{ a.id.slice(0,8) }}...</td>
                   <td class="px-4 py-3">{{ a.provider_id }}</td>
                   <td class="px-4 py-3"><span :class="['px-2 py-1 rounded text-xs', a.is_enabled?'bg-green-500/20 text-green-400':'bg-red-500/20 text-red-400']">{{ a.is_enabled?t('enabled'):t('disabled') }}</span></td>
@@ -246,11 +275,12 @@
                 <th class="px-4 py-3 text-left text-gray-400">{{ t('ttft') }}</th>
                 <th class="px-4 py-3 text-left text-gray-400">{{ t('latency') }}</th>
                 <th class="px-4 py-3 text-left text-gray-400">{{ t('streaming') }}</th>
+                <th class="px-4 py-3 text-left text-gray-400">{{ t('actions') }}</th>
               </tr></thead>
               <tbody class="divide-y divide-gray-700">
-                <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td></tr>
-                <tr v-else-if="!logs.length"><td colspan="8" class="px-4 py-8 text-center text-gray-400">{{ t('noLogs') }}</td></tr>
-                <tr v-for="l in logs" :key="l.RequestID" class="hover:bg-gray-700/30">
+                <tr v-if="loading"><td colspan="9" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td></tr>
+                <tr v-else-if="!logs.length"><td colspan="9" class="px-4 py-8 text-center text-gray-400">{{ t('noLogs') }}</td></tr>
+                <tr v-for="l in logs" :key="l.RequestID" class="hover:bg-gray-700/30 cursor-pointer" @click="openLogDetailModal(l)">
                   <td class="px-4 py-3 text-xs text-gray-400">{{ formatDate(l.Timestamp) }}</td>
                   <td class="px-4 py-3 text-xs">{{ l.ProviderID }}</td>
                   <td class="px-4 py-3 text-xs font-mono">{{ l.Model }}</td>
@@ -259,6 +289,7 @@
                   <td class="px-4 py-3">{{ formatDuration(l.TTFTMs) }}</td>
                   <td class="px-4 py-3">{{ formatDuration(l.LatencyMs) }}</td>
                   <td class="px-4 py-3"><span :class="['px-2 py-1 rounded text-xs', l.IsStreaming?'bg-blue-500/20 text-blue-400':'bg-gray-700 text-gray-400']">{{ l.IsStreaming?t('yes'):t('no') }}</span></td>
+                  <td class="px-4 py-3"><button class="px-2 py-1 bg-gray-600/20 hover:bg-gray-600/30 text-gray-300 rounded text-xs">{{ t('viewDetail') }}</button></td>
                 </tr>
               </tbody>
             </table>
@@ -267,6 +298,20 @@
 
         <!-- Stats -->
         <div v-if="currentView==='stats'">
+          <div class="flex flex-wrap gap-2 mb-4 items-center">
+            <select v-model="timeSeriesRange" class="px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 text-sm">
+              <option value="24">{{ t('last24h') }}</option>
+              <option value="168">{{ t('last7d') }}</option>
+              <option value="720">{{ t('last30d') }}</option>
+            </select>
+            <button @click="exportData('stats')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">{{ t('exportCSV') }}</button>
+            <button @click="exportData('accounts')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">{{ t('exportAccounts') }}</button>
+            <button @click="exportData('models')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">{{ t('exportModels') }}</button>
+          </div>
+          <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 mb-6">
+            <h3 class="font-semibold mb-4">{{ t('requestTrend') }}</h3>
+            <div class="h-64"><canvas id="trendChart"></canvas></div>
+          </div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><h3 class="font-semibold mb-4">{{ t('requestsByProvider') }}</h3><div class="h-64"><canvas id="requestsChart"></canvas></div></div>
             <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><h3 class="font-semibold mb-4">{{ t('tokensByProvider') }}</h3><div class="h-64"><canvas id="tokensChart"></canvas></div></div>
@@ -302,6 +347,52 @@
               <div class="space-y-1 max-h-40 overflow-y-auto">
                 <div v-for="(c,m) in topModels" :key="m" class="flex justify-between p-2 bg-gray-700/50 rounded text-sm"><span class="font-mono">{{ m }}</span><span class="text-gray-400">{{ formatNumber(c) }}</span></div>
                 <p v-if="!Object.keys(topModels).length" class="text-gray-500 text-center py-4">{{ t('noData') }}</p>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+              <h3 class="font-semibold mb-4">{{ t('accountStats') }}</h3>
+              <div class="overflow-x-auto max-h-60">
+                <table class="w-full text-xs">
+                  <thead class="bg-gray-700/50"><tr>
+                    <th class="px-2 py-2 text-left text-gray-400">{{ t('id') }}</th>
+                    <th class="px-2 py-2 text-right text-gray-400">{{ t('requests') }}</th>
+                    <th class="px-2 py-2 text-right text-gray-400">{{ t('tokens') }}</th>
+                    <th class="px-2 py-2 text-right text-gray-400">{{ t('successRate') }}</th>
+                  </tr></thead>
+                  <tbody class="divide-y divide-gray-700">
+                    <tr v-for="a in accountStats" :key="a.AccountID" class="hover:bg-gray-700/30">
+                      <td class="px-2 py-2 font-mono">{{ a.AccountID?.slice(0,8) }}...</td>
+                      <td class="px-2 py-2 text-right">{{ a.RequestCount }}</td>
+                      <td class="px-2 py-2 text-right">{{ formatNumber(a.TotalTokens) }}</td>
+                      <td class="px-2 py-2 text-right" :class="a.SuccessRate>90?'text-green-400':a.SuccessRate>70?'text-yellow-400':'text-red-400'">{{ formatPercent(a.SuccessRate) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="!accountStats.length" class="text-gray-500 text-center py-4">{{ t('noData') }}</p>
+              </div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+              <h3 class="font-semibold mb-4">{{ t('modelStats') }}</h3>
+              <div class="overflow-x-auto max-h-60">
+                <table class="w-full text-xs">
+                  <thead class="bg-gray-700/50"><tr>
+                    <th class="px-2 py-2 text-left text-gray-400">{{ t('model') }}</th>
+                    <th class="px-2 py-2 text-right text-gray-400">{{ t('requests') }}</th>
+                    <th class="px-2 py-2 text-right text-gray-400">{{ t('ttft') }}</th>
+                    <th class="px-2 py-2 text-right text-gray-400">{{ t('successRate') }}</th>
+                  </tr></thead>
+                  <tbody class="divide-y divide-gray-700">
+                    <tr v-for="m in modelStats" :key="m.Model" class="hover:bg-gray-700/30">
+                      <td class="px-2 py-2 font-mono truncate max-w-[120px]">{{ m.Model?.split('/').pop() }}</td>
+                      <td class="px-2 py-2 text-right">{{ m.RequestCount }}</td>
+                      <td class="px-2 py-2 text-right">{{ formatDuration(m.AvgTTFTMs) }}</td>
+                      <td class="px-2 py-2 text-right" :class="m.SuccessRate>90?'text-green-400':m.SuccessRate>70?'text-yellow-400':'text-red-400'">{{ formatPercent(m.SuccessRate) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="!modelStats.length" class="text-gray-500 text-center py-4">{{ t('noData') }}</p>
               </div>
             </div>
           </div>

@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -588,12 +590,18 @@ func (s *Server) setupAdminAPI() (*http.Server, error) {
 	adminGroup.PUT("/admin/accounts/:id", s.handleAdminUpdateAccount)
 	adminGroup.DELETE("/admin/accounts/:id", s.handleAdminDeleteAccount)
 	adminGroup.POST("/admin/accounts/:id/reset", s.handleAdminResetAccount)
-	adminGroup.GET("/admin/stats", s.handleAdminStats)
+	adminGroup.POST("/admin/accounts/batch", s.handleAdminBatchAccountOperation)
+	adminGroup.GET("/admin/stats", s.handleAdminStatsFromDB)
+	adminGroup.GET("/admin/stats/timeseries", s.handleAdminTimeSeries)
+	adminGroup.GET("/admin/stats/accounts", s.handleAdminAllAccountStats)
+	adminGroup.GET("/admin/stats/models", s.handleAdminModelStats)
 	adminGroup.GET("/admin/providers", s.handleAdminListProviders)
 	adminGroup.GET("/admin/providers/stats", s.handleAdminProviderStats)
 	adminGroup.GET("/admin/logs", s.handleAdminLogs)
+	adminGroup.GET("/admin/logs/:id", s.handleAdminLogDetail)
 	adminGroup.GET("/admin/version", s.handleAdminVersion)
 	adminGroup.GET("/admin/model-mapping", s.handleAdminModelMapping)
+	adminGroup.GET("/admin/export/:type", s.handleAdminExport)
 	adminGroup.POST("/admin/reload", s.handleAdminReload)
 	adminGroup.GET("/admin/health", s.handleHealth)
 
@@ -1283,6 +1291,107 @@ func (s *Server) handleAdminStats(c *gin.Context) {
 	statsHandler.ServeJSON(c.Writer, c.Request)
 }
 
+func (s *Server) handleAdminStatsFromDB(c *gin.Context) {
+	hours := 24
+	if h := c.Query("hours"); h != "" {
+		if parsed, err := fmt.Sscanf(h, "%d", &hours); err == nil && parsed == 1 {
+			if hours > 720 {
+				hours = 720
+			}
+		}
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	timeSeries, err := s.storage.GetRequestTimeSeries(c.Request.Context(), since, "hour")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	modelStats, _ := s.storage.GetModelStats(c.Request.Context(), since)
+	latencyData, _ := s.storage.GetLatencyData(c.Request.Context(), since)
+
+	var totalRequests, totalTokens, totalErrors int64
+	requestsByModel := make(map[string]int64)
+	tokensByModel := make(map[string]int64)
+	requestsByProvider := make(map[string]int64)
+	tokensByProvider := make(map[string]int64)
+
+	for _, p := range timeSeries {
+		totalRequests += p.Count
+		totalTokens += p.Tokens
+		totalErrors += p.Errors
+	}
+
+	for _, m := range modelStats {
+		requestsByModel[m.Model] = m.RequestCount
+		tokensByModel[m.Model] = m.TotalTokens
+		provider := "unknown"
+		if parts := strings.Split(m.Model, "/"); len(parts) > 1 {
+			provider = parts[0]
+		}
+		requestsByProvider[provider] += m.RequestCount
+		tokensByProvider[provider] += m.TotalTokens
+	}
+
+	avgTTFT := 0.0
+	avgLatency := 0.0
+	if len(modelStats) > 0 {
+		for _, m := range modelStats {
+			avgTTFT += m.AvgTTFTMs
+			avgLatency += m.AvgLatencyMs
+		}
+		avgTTFT /= float64(len(modelStats))
+		avgLatency /= float64(len(modelStats))
+	}
+
+	latencyPercentiles := calculatePercentiles(latencyData, func(d *storage.LatencyData) float64 { return d.LatencyMs })
+	ttftPercentiles := calculatePercentiles(latencyData, func(d *storage.LatencyData) float64 { return d.TTFTMs })
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_requests":       totalRequests,
+		"total_tokens":         totalTokens,
+		"total_errors":         totalErrors,
+		"avg_ttft_ms":          avgTTFT,
+		"avg_latency_ms":       avgLatency,
+		"requests_by_provider": requestsByProvider,
+		"requests_by_model":    requestsByModel,
+		"tokens_by_provider":   tokensByProvider,
+		"tokens_by_model":      tokensByModel,
+		"latency_percentiles":  latencyPercentiles,
+		"ttft_percentiles":     ttftPercentiles,
+		"timestamp":            time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func calculatePercentiles(data []*storage.LatencyData, getValue func(*storage.LatencyData) float64) map[string]float64 {
+	if len(data) == 0 {
+		return map[string]float64{"p50": 0, "p95": 0, "p99": 0}
+	}
+
+	values := make([]float64, 0, len(data))
+	for _, d := range data {
+		v := getValue(d)
+		if v > 0 {
+			values = append(values, v)
+		}
+	}
+
+	if len(values) == 0 {
+		return map[string]float64{"p50": 0, "p95": 0, "p99": 0}
+	}
+
+	sort.Float64s(values)
+	n := len(values)
+
+	p50 := values[n*50/100]
+	p95 := values[n*95/100]
+	p99 := values[n*99/100]
+
+	return map[string]float64{"p50": p50, "p95": p95, "p99": p99}
+}
+
 func (s *Server) handleAdminListProviders(c *gin.Context) {
 	providers := s.registry.List()
 	result := make([]map[string]interface{}, 0, len(providers))
@@ -1455,6 +1564,185 @@ func (s *Server) handleAdminModelMapping(c *gin.Context) {
 		mapping[k] = v
 	}
 	c.JSON(http.StatusOK, gin.H{"model_mapping": mapping})
+}
+
+func (s *Server) handleAdminTimeSeries(c *gin.Context) {
+	interval := c.DefaultQuery("interval", "hour")
+	if interval != "hour" && interval != "day" {
+		interval = "hour"
+	}
+
+	hours := 24
+	if h := c.Query("hours"); h != "" {
+		if parsed, err := fmt.Sscanf(h, "%d", &hours); err == nil && parsed == 1 {
+			if hours > 720 {
+				hours = 720
+			}
+		}
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	points, err := s.storage.GetRequestTimeSeries(c.Request.Context(), since, interval)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"timeseries": points})
+}
+
+func (s *Server) handleAdminAllAccountStats(c *gin.Context) {
+	hours := 24
+	if h := c.Query("hours"); h != "" {
+		if parsed, err := fmt.Sscanf(h, "%d", &hours); err == nil && parsed == 1 {
+			if hours > 720 {
+				hours = 720
+			}
+		}
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	stats, err := s.storage.GetAllAccountStats(c.Request.Context(), since)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"account_stats": stats})
+}
+
+func (s *Server) handleAdminModelStats(c *gin.Context) {
+	hours := 24
+	if h := c.Query("hours"); h != "" {
+		if parsed, err := fmt.Sscanf(h, "%d", &hours); err == nil && parsed == 1 {
+			if hours > 720 {
+				hours = 720
+			}
+		}
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	stats, err := s.storage.GetModelStats(c.Request.Context(), since)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"model_stats": stats})
+}
+
+func (s *Server) handleAdminBatchAccountOperation(c *gin.Context) {
+	var req struct {
+		Action     string   `json:"action"`
+		AccountIDs []string `json:"account_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if len(req.AccountIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no accounts specified"})
+		return
+	}
+
+	successCount := 0
+	for _, id := range req.AccountIDs {
+		switch req.Action {
+		case "enable":
+			for _, p := range s.accountPools {
+				if acc, err := p.Get(id); err == nil {
+					p.SetEnabled(id, true)
+					acc.IsEnabled = true
+					s.storage.UpsertAccount(c.Request.Context(), acc)
+					successCount++
+					break
+				}
+			}
+		case "disable":
+			for _, p := range s.accountPools {
+				if acc, err := p.Get(id); err == nil {
+					p.SetEnabled(id, false)
+					acc.IsEnabled = false
+					s.storage.UpsertAccount(c.Request.Context(), acc)
+					successCount++
+					break
+				}
+			}
+		case "reset":
+			for _, p := range s.accountPools {
+				if _, err := p.Get(id); err == nil {
+					p.ResetFailures(id)
+					if l, ok := s.limiters[id]; ok {
+						l.Reset(c.Request.Context(), id)
+					}
+					successCount++
+					break
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": successCount, "total": len(req.AccountIDs)})
+}
+
+func (s *Server) handleAdminLogDetail(c *gin.Context) {
+	requestID := c.Param("id")
+	logs, err := s.storage.GetRecentLogs(c.Request.Context(), 500)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	for _, log := range logs {
+		if log.RequestID == requestID {
+			c.JSON(http.StatusOK, gin.H{"log": log})
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{"error": "log not found"})
+}
+
+func (s *Server) handleAdminExport(c *gin.Context) {
+	exportType := c.Param("type")
+
+	switch exportType {
+	case "accounts":
+		accounts, err := s.storage.GetAllAccountStats(c.Request.Context(), time.Now().Add(-24*time.Hour))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Header("Content-Disposition", "attachment; filename=accounts.csv")
+		c.Header("Content-Type", "text/csv")
+		c.Writer.WriteString("account_id,request_count,error_count,total_tokens,avg_latency_ms,success_rate\n")
+		for _, a := range accounts {
+			c.Writer.WriteString(fmt.Sprintf("%s,%d,%d,%d,%.2f,%.2f\n", a.AccountID, a.RequestCount, a.ErrorCount, a.TotalTokens, a.AvgLatencyMs, a.SuccessRate))
+		}
+	case "models":
+		stats, err := s.storage.GetModelStats(c.Request.Context(), time.Now().Add(-24*time.Hour))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Header("Content-Disposition", "attachment; filename=models.csv")
+		c.Header("Content-Type", "text/csv")
+		c.Writer.WriteString("model,request_count,error_count,total_tokens,avg_ttft_ms,avg_latency_ms,success_rate\n")
+		for _, m := range stats {
+			c.Writer.WriteString(fmt.Sprintf("%s,%d,%d,%d,%.2f,%.2f,%.2f\n", m.Model, m.RequestCount, m.ErrorCount, m.TotalTokens, m.AvgTTFTMs, m.AvgLatencyMs, m.SuccessRate))
+		}
+	case "stats":
+		c.Header("Content-Disposition", "attachment; filename=stats.csv")
+		c.Header("Content-Type", "text/csv")
+		c.Writer.WriteString("timestamp,total_requests,total_tokens,total_errors\n")
+		points, _ := s.storage.GetRequestTimeSeries(c.Request.Context(), time.Now().Add(-24*time.Hour), "hour")
+		for _, p := range points {
+			c.Writer.WriteString(fmt.Sprintf("%s,%d,%d,%d\n", p.Timestamp.Format("2006-01-02 15:04"), p.Count, p.Tokens, p.Errors))
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid export type"})
+	}
 }
 
 func init() {

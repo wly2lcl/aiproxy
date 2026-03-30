@@ -152,6 +152,26 @@ func (m *mockStorage) RecordRequestLog(ctx context.Context, log *storage.Request
 	return nil
 }
 
+func (m *mockStorage) GetRequestTimeSeries(ctx context.Context, since time.Time, interval string) ([]*storage.TimeSeriesPoint, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) GetAccountStats(ctx context.Context, accountID string, since time.Time) (*storage.AccountStats, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) GetAllAccountStats(ctx context.Context, since time.Time) ([]*storage.AccountStats, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) GetModelStats(ctx context.Context, since time.Time) ([]*storage.ModelStats, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) GetLatencyData(ctx context.Context, since time.Time) ([]*storage.LatencyData, error) {
+	return nil, nil
+}
+
 func TestRPM_Allow_UnderLimit(t *testing.T) {
 	store := newMockStorage()
 	limiter := NewRPM(store, 10)

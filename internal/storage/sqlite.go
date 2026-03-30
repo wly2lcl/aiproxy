@@ -587,3 +587,128 @@ func (s *SQLite) RecordRequestLog(ctx context.Context, log *RequestLog) error {
 
 	return nil
 }
+
+func (s *SQLite) GetRequestTimeSeries(ctx context.Context, since time.Time, interval string) ([]*TimeSeriesPoint, error) {
+	var query string
+	switch interval {
+	case "hour":
+		query = getTimeSeriesHourlyQuery
+	case "day":
+		query = getTimeSeriesDailyQuery
+	default:
+		query = getTimeSeriesHourlyQuery
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, since.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get time series: %w", err)
+	}
+	defer rows.Close()
+
+	var points []*TimeSeriesPoint
+	for rows.Next() {
+		var p TimeSeriesPoint
+		var tsStr string
+		err := rows.Scan(&tsStr, &p.Count, &p.Tokens, &p.Errors)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan time series point: %w", err)
+		}
+		p.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
+		points = append(points, &p)
+	}
+
+	return points, nil
+}
+
+func (s *SQLite) GetAllAccountStats(ctx context.Context, since time.Time) ([]*AccountStats, error) {
+	rows, err := s.db.QueryContext(ctx, getAllAccountStatsQuery, since.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all account stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []*AccountStats
+	for rows.Next() {
+		var st AccountStats
+		var avgLatency, avgTTFT, successRate sql.NullFloat64
+		var lastUsedStr sql.NullString
+		err := rows.Scan(&st.AccountID, &st.RequestCount, &st.ErrorCount, &st.TotalTokens, &avgLatency, &avgTTFT, &successRate, &lastUsedStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan account stats: %w", err)
+		}
+		if avgLatency.Valid {
+			st.AvgLatencyMs = avgLatency.Float64
+		}
+		if avgTTFT.Valid {
+			st.AvgTTFTMs = avgTTFT.Float64
+		}
+		if successRate.Valid {
+			st.SuccessRate = successRate.Float64
+		}
+		if lastUsedStr.Valid && lastUsedStr.String != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05", lastUsedStr.String); err == nil {
+				st.LastUsedAt = &t
+			}
+		}
+		stats = append(stats, &st)
+	}
+
+	return stats, nil
+}
+
+func (s *SQLite) GetModelStats(ctx context.Context, since time.Time) ([]*ModelStats, error) {
+	rows, err := s.db.QueryContext(ctx, getModelStatsQuery, since.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []*ModelStats
+	for rows.Next() {
+		var st ModelStats
+		var avgLatency, avgTTFT, successRate sql.NullFloat64
+		err := rows.Scan(&st.Model, &st.RequestCount, &st.ErrorCount, &st.TotalTokens, &avgLatency, &avgTTFT, &successRate)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan model stats: %w", err)
+		}
+		if avgLatency.Valid {
+			st.AvgLatencyMs = avgLatency.Float64
+		}
+		if avgTTFT.Valid {
+			st.AvgTTFTMs = avgTTFT.Float64
+		}
+		if successRate.Valid {
+			st.SuccessRate = successRate.Float64
+		}
+		stats = append(stats, &st)
+	}
+
+	return stats, nil
+}
+
+func (s *SQLite) GetLatencyData(ctx context.Context, since time.Time) ([]*LatencyData, error) {
+	rows, err := s.db.QueryContext(ctx, getLatencyDataQuery, since.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latency data: %w", err)
+	}
+	defer rows.Close()
+
+	var data []*LatencyData
+	for rows.Next() {
+		var d LatencyData
+		var latency, ttft sql.NullFloat64
+		err := rows.Scan(&latency, &ttft, &d.Status)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan latency data: %w", err)
+		}
+		if latency.Valid {
+			d.LatencyMs = latency.Float64
+		}
+		if ttft.Valid {
+			d.TTFTMs = ttft.Float64
+		}
+		data = append(data, &d)
+	}
+
+	return data, nil
+}

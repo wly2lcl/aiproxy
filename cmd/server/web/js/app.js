@@ -22,10 +22,16 @@ const app = Vue.createApp({
       modelMapping: {},
       logs: [],
       accountFilter: { provider: '', status: '', available: '' },
+      selectedAccounts: [],
+      timeSeries: [],
+      timeSeriesRange: '24',
+      accountStats: [],
+      modelStats: [],
       confirmModal: { show: false, title: '', message: '', onConfirm: () => {}, onCancel: () => {} },
       accountModal: { show: false, isEdit: false, form: { id: '', provider_id: '', api_key: '', weight: 1, priority: 1, enabled: true } },
       accountLimitsModal: { show: false, account: null, limits: [] },
-      providerModal: { show: false, provider: null }
+      providerModal: { show: false, provider: null },
+      logDetailModal: { show: false, log: null }
     }
   },
   computed: {
@@ -61,13 +67,23 @@ const app = Vue.createApp({
     if (this.adminKey) this.fetchAll()
   },
   watch: {
-    currentView(v) { if (v === 'stats') this.$nextTick(() => this.initCharts()) },
+    currentView(v) {
+      if (v === 'stats') {
+        this.$nextTick(() => {
+          this.initCharts()
+          this.initTrendChart()
+        })
+      }
+    },
     autoRefresh(v) {
       if (v) {
         this.autoRefreshTimer = setInterval(() => this.fetchAll(), 5000)
       } else {
         clearInterval(this.autoRefreshTimer)
       }
+    },
+    timeSeriesRange() {
+      this.fetchTimeSeries()
     }
   },
   methods: {
@@ -78,7 +94,7 @@ const app = Vue.createApp({
       if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Request failed' })); throw new Error(e.error || `HTTP ${res.status}`) }
       return res.json()
     },
-    async fetchAll() { await Promise.all([this.fetchAccounts(), this.fetchProviders(), this.fetchStats(), this.fetchLogs(), this.fetchVersion(), this.fetchModelMapping()]) },
+    async fetchAll() { await Promise.all([this.fetchAccounts(), this.fetchProviders(), this.fetchStats(), this.fetchLogs(), this.fetchVersion(), this.fetchModelMapping(), this.fetchTimeSeries(), this.fetchAccountStats(), this.fetchModelStats()]) },
     async fetchAccounts() {
       try {
         const data = await this.apiCall('/admin/accounts')
@@ -106,6 +122,18 @@ const app = Vue.createApp({
     async fetchLogs() { try { const d = await this.apiCall('/admin/logs?limit=100'); this.logs = d.logs || [] } catch (e) {} },
     async fetchVersion() { try { const d = await this.apiCall('/admin/version'); this.version = d } catch (e) {} },
     async fetchModelMapping() { try { const d = await this.apiCall('/admin/model-mapping'); this.modelMapping = d.model_mapping || {} } catch (e) {} },
+    async fetchTimeSeries() {
+      try { const d = await this.apiCall(`/admin/stats/timeseries?hours=${this.timeSeriesRange}`); this.timeSeries = d.timeseries || [] }
+      catch (e) {}
+    },
+    async fetchAccountStats() {
+      try { const d = await this.apiCall('/admin/stats/accounts?hours=24'); this.accountStats = d.account_stats || [] }
+      catch (e) {}
+    },
+    async fetchModelStats() {
+      try { const d = await this.apiCall('/admin/stats/models?hours=24'); this.modelStats = d.model_stats || [] }
+      catch (e) {}
+    },
     async fetchAccountLimits(id) {
       try { const d = await this.apiCall(`/admin/accounts/${id}/limits`); return d.limits || [] }
       catch (e) { return [] }
@@ -116,6 +144,7 @@ const app = Vue.createApp({
       const limits = await this.fetchAccountLimits(a.id)
       this.accountLimitsModal = { show: true, account: a, limits }
     },
+    openLogDetailModal(log) { this.logDetailModal = { show: true, log } },
     async saveAccount() {
       this.loading = true
       try {
@@ -141,6 +170,41 @@ const app = Vue.createApp({
         catch (e) { this.showToast(e.message, 'error') }
       })
     },
+    toggleSelectAccount(id) {
+      const idx = this.selectedAccounts.indexOf(id)
+      if (idx > -1) { this.selectedAccounts.splice(idx, 1) } else { this.selectedAccounts.push(id) }
+    },
+    toggleSelectAll() {
+      if (this.selectedAccounts.length === this.filteredAccounts.length) { this.selectedAccounts = [] }
+      else { this.selectedAccounts = this.filteredAccounts.map(a => a.id) }
+    },
+    async batchOperation(action) {
+      if (!this.selectedAccounts.length) return
+      this.showConfirm(this.t('confirm'), `${this.t(action)} ${this.selectedAccounts.length} ${this.t('accountsCount')}?`, async () => {
+        try {
+          await this.apiCall('/admin/accounts/batch', { method: 'POST', body: JSON.stringify({ action, account_ids: this.selectedAccounts }) })
+          this.showToast('Success', 'success')
+          this.selectedAccounts = []
+          await this.fetchAccounts()
+        } catch (e) { this.showToast(e.message, 'error') }
+      })
+    },
+    exportData(type) {
+      fetch(`${API_BASE}/admin/export/${type}`, {
+        headers: this.getHeaders()
+      })
+      .then(res => res.text())
+      .then(csv => {
+        const blob = new Blob([csv], { type: 'text/csv' })
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${type}.csv`
+        a.click()
+        window.URL.revokeObjectURL(url)
+      })
+      .catch(e => this.showToast(e.message, 'error'))
+    },
     openProviderModal(p) { this.providerModal = { show: true, provider: p } },
     async reloadConfig() {
       this.showConfirm(this.t('reloadConfigTitle'), this.t('reloadConfigMsg'), async () => {
@@ -164,8 +228,34 @@ const app = Vue.createApp({
       this.charts.requests = new Chart(rCtx, { type: 'bar', data: { labels: Object.keys(this.stats.by_provider || {}), datasets: [{ data: Object.values(this.stats.by_provider || {}), backgroundColor: colors }] }, options: opts })
       this.charts.tokens = new Chart(tCtx, { type: 'bar', data: { labels: Object.keys(this.stats.tokens_by_provider || {}), datasets: [{ data: Object.values(this.stats.tokens_by_provider || {}), backgroundColor: colors }] }, options: opts })
     },
+    initTrendChart() {
+      if (this.charts.trend) this.charts.trend.destroy()
+      const ctx = document.getElementById('trendChart')
+      if (!ctx || !this.timeSeries.length) return
+      const labels = this.timeSeries.map(p => p.Timestamp ? new Date(p.Timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '')
+      this.charts.trend = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: this.t('requests'), data: this.timeSeries.map(p => p.Count), borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.3 },
+            { label: this.t('tokens'), data: this.timeSeries.map(p => p.Tokens), borderColor: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.1)', fill: true, tension: 0.3, yAxisID: 'y1' }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true, position: 'left', grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
+            y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#22c55e' } },
+            x: { grid: { display: false }, ticks: { color: '#9ca3af', maxTicksLimit: 12 } }
+          },
+          plugins: { legend: { labels: { color: '#9ca3af' } } }
+        }
+      })
+    },
     formatNumber(n) { if (!n) return '0'; if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'; if (n >= 1000) return (n / 1000).toFixed(1) + 'K'; return n.toString() },
     formatDate(d) { return d ? new Date(d).toLocaleString() : '' },
-    formatDuration(ms) { if (!ms) return '-'; if (ms < 1000) return ms.toFixed(0) + 'ms'; return (ms / 1000).toFixed(2) + 's' }
+    formatDuration(ms) { if (!ms) return '-'; if (ms < 1000) return ms.toFixed(0) + 'ms'; return (ms / 1000).toFixed(2) + 's' },
+    formatPercent(v) { return v ? v.toFixed(1) + '%' : '0%' }
   }
 })

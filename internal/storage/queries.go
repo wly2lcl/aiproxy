@@ -109,4 +109,56 @@ LIMIT ?`
 	recordRequestLogQuery = `
 INSERT INTO request_logs (request_id, account_id, provider_id, model, status, tokens, ttft_ms, latency_ms, error_type, is_streaming)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	getTimeSeriesHourlyQuery = `
+SELECT strftime('%Y-%m-%d %H:00:00', created_at) as hour,
+       COUNT(*) as count,
+       COALESCE(SUM(tokens), 0) as tokens,
+       SUM(CASE WHEN status >= 400 OR error_type != '' THEN 1 ELSE 0 END) as errors
+FROM request_logs
+WHERE created_at >= ?
+GROUP BY hour
+ORDER BY hour`
+
+	getTimeSeriesDailyQuery = `
+SELECT strftime('%Y-%m-%d 00:00:00', created_at) as day,
+       COUNT(*) as count,
+       COALESCE(SUM(tokens), 0) as tokens,
+       SUM(CASE WHEN status >= 400 OR error_type != '' THEN 1 ELSE 0 END) as errors
+FROM request_logs
+WHERE created_at >= ?
+GROUP BY day
+ORDER BY day`
+
+	getAllAccountStatsQuery = `
+SELECT account_id,
+       COUNT(*) as request_count,
+       SUM(CASE WHEN status >= 400 OR error_type != '' THEN 1 ELSE 0 END) as error_count,
+       COALESCE(SUM(tokens), 0) as total_tokens,
+       AVG(latency_ms) as avg_latency,
+       AVG(ttft_ms) as avg_ttft,
+       (1.0 - CAST(SUM(CASE WHEN status >= 400 OR error_type != '' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 as success_rate,
+       MAX(created_at) as last_used
+FROM request_logs
+WHERE created_at >= ?
+GROUP BY account_id
+ORDER BY request_count DESC`
+
+	getModelStatsQuery = `
+SELECT model,
+       COUNT(*) as request_count,
+       SUM(CASE WHEN status >= 400 OR error_type != '' THEN 1 ELSE 0 END) as error_count,
+       COALESCE(SUM(tokens), 0) as total_tokens,
+       AVG(latency_ms) as avg_latency,
+       AVG(ttft_ms) as avg_ttft,
+       (1.0 - CAST(SUM(CASE WHEN status >= 400 OR error_type != '' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 as success_rate
+FROM request_logs
+WHERE created_at >= ?
+GROUP BY model
+ORDER BY request_count DESC`
+
+	getLatencyDataQuery = `
+SELECT latency_ms, ttft_ms, status
+FROM request_logs
+WHERE created_at >= ? AND latency_ms > 0`
 )

@@ -58,6 +58,18 @@ type Storage interface {
 
 	RecordRequestLog(ctx context.Context, log *RequestLog) error
 
+	// Time series data for charts
+	GetRequestTimeSeries(ctx context.Context, since time.Time, interval string) ([]*TimeSeriesPoint, error)
+
+	// Account statistics
+	GetAllAccountStats(ctx context.Context, since time.Time) ([]*AccountStats, error)
+
+	// Model statistics
+	GetModelStats(ctx context.Context, since time.Time) ([]*ModelStats, error)
+
+	// Latency data for percentile calculation
+	GetLatencyData(ctx context.Context, since time.Time) ([]*LatencyData, error)
+
 	Close() error
 }
 
@@ -74,4 +86,41 @@ type RequestLog struct {
 	ErrorType   string
 	Timestamp   time.Time
 	IsStreaming bool
+}
+
+// TimeSeriesPoint represents a data point for time series charts
+type TimeSeriesPoint struct {
+	Timestamp time.Time
+	Count     int64
+	Tokens    int64
+	Errors    int64
+}
+
+// AccountStats represents statistics for an account
+type AccountStats struct {
+	AccountID    string
+	RequestCount int64
+	ErrorCount   int64
+	TotalTokens  int64
+	AvgLatencyMs float64
+	AvgTTFTMs    float64
+	SuccessRate  float64
+	LastUsedAt   *time.Time
+}
+
+// ModelStats represents statistics for a model
+type ModelStats struct {
+	Model        string
+	RequestCount int64
+	ErrorCount   int64
+	TotalTokens  int64
+	AvgTTFTMs    float64
+	AvgLatencyMs float64
+	SuccessRate  float64
+}
+
+type LatencyData struct {
+	LatencyMs float64
+	TTFTMs    float64
+	Status    int
 }
