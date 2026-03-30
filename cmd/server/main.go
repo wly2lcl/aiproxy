@@ -670,7 +670,16 @@ func (s *Server) handleWithProvider(c *gin.Context, req *openai.ChatCompletionRe
 		return
 	}
 
-	s.executeRequest(c, req, prov, prov.Name(), startTime)
+	_, _, err = s.executeRequest(c, req, prov, prov.Name(), startTime)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, openai.ErrorResponse{
+			Error: openai.ErrorDetail{
+				Message: err.Error(),
+				Type:    "api_error",
+				Code:    "request_failed",
+			},
+		})
+	}
 }
 
 func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionRequest, prov provider.Provider, providerName string, startTime time.Time) (*http.Response, *domain.Account, error) {
