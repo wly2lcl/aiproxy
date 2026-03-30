@@ -53,6 +53,9 @@ func NewSQLite(cfg *config.DatabaseConfig) (*SQLite, error) {
 
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxIdle)
+	// 定期回收连接，防止长时间运行后连接积累导致文件锁问题
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := RunMigrations(db); err != nil {
 		db.Close()

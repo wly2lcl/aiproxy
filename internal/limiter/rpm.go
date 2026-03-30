@@ -49,6 +49,9 @@ func (r *RPM) Allow(ctx context.Context, key string) (bool, error) {
 		r.windows[key] = sw
 	}
 
+	// 清理窗口外的过期记录，避免切片无限增长导致内存泄漏
+	r.pruneWindow(sw, windowStart)
+
 	total := r.countInWindow(sw, windowStart, now)
 	if total >= r.max {
 		return false, nil
@@ -128,4 +131,18 @@ func (r *RPM) countInWindow(sw *slidingWindow, windowStart, now time.Time) int {
 		}
 	}
 	return total
+}
+
+// pruneWindow 原地删除窗口起始时间之前的过期记录，避免切片无限增长
+func (r *RPM) pruneWindow(sw *slidingWindow, windowStart time.Time) {
+	validIdx := 0
+	for i, ts := range sw.timestamps {
+		if ts.After(windowStart) {
+			sw.counts[validIdx] = sw.counts[i]
+			sw.timestamps[validIdx] = ts
+			validIdx++
+		}
+	}
+	sw.counts = sw.counts[:validIdx]
+	sw.timestamps = sw.timestamps[:validIdx]
 }

@@ -687,7 +687,8 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 	slog.Info("account selected", "account_id", account.ID[:8], "weight", account.Weight, "priority", account.Priority, "provider", providerName)
 
 	mappedModel := s.router.GetMappedModel(req.Model)
-	req.Model = mappedModel
+	// 不直接修改 req.Model，避免 fallback 场景下污染原始请求
+	// req.Model = mappedModel  ← 已移除
 
 	retry := s.retries[providerName]
 
@@ -847,6 +848,8 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 }
 
 func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, account *domain.Account, providerName string, req *openai.ChatCompletionRequest, startTime time.Time) {
+	defer resp.Body.Close() // 确保 HTTP 连接被释放回连接池
+
 	for key, values := range resp.Header {
 		for _, value := range values {
 			c.Header(key, value)
