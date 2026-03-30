@@ -78,7 +78,6 @@ docker-run:
 	@echo "Running Docker container..."
 	docker run -d --name $(APP_NAME) \
 		-p 8080:8080 \
-		-p 8081:8081 \
 		-v $(PWD)/data:/app/data \
 		-v $(PWD)/config:/app/config \
 		$(APP_NAME):latest

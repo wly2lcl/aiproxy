@@ -14,7 +14,7 @@
 - **SQLite 持久化**：限流状态跨重启保持（WAL 模式）
 - **流式响应**：完整的 SSE 流式传输支持
 - **Token 追踪**：混合模式精确统计流式响应的 Token 用量
-- **管理接口**：独立的本地管理 API
+- **管理后台**：内置 Web UI 监控管理界面
 - **Prometheus 指标**：内置可观测性支持
 - **优雅关闭**：零停机重启
 
@@ -88,13 +88,13 @@ go run ./cmd/server
 
 | 字段 | 描述 | 默认值 |
 |-----|------|-------|
-| `server.port` | 公开 API 端口 | 8080 |
-| `server.host` | 公开 API 主机 | 0.0.0.0 |
+| `server.port` | API 服务器端口（公共 + 管理合并） | 8080 |
+| `server.host` | API 服务器主机 | 0.0.0.0 |
 | `database.path` | SQLite 数据库路径 | data/aiproxy.db |
 | `auth.enabled` | 启用 API Key 认证 | false |
 | `auth.api_keys` | 有效 API Key 列表 | [] |
-| `admin.enabled` | 启用管理 API | true |
-| `admin.listen` | 管理 API 地址 | 127.0.0.1:8081 |
+| `admin.enabled` | 启用管理 API 和后台 | true |
+| `admin.api_keys` | 管理 API 认证密钥（安全必需） | [] |
 
 ### Provider 配置
 
@@ -150,7 +150,9 @@ export AIPROXY_LOGGING_LEVEL=debug
 
 ## API 端点
 
-### 公开 API（端口 8080）
+所有端点均在 8080 端口提供服务。
+
+### 公开 API
 
 | 端点 | 方法 | 描述 |
 |-----|------|------|
@@ -160,20 +162,28 @@ export AIPROXY_LOGGING_LEVEL=debug
 | `/ready` | GET | 就绪检查 |
 | `/metrics` | GET | Prometheus 指标 |
 
-### 管理 API（端口 8081，仅本地）
+### 管理 API 与后台
 
-| 端点 | 方法 | 描述 |
-|-----|------|------|
-| `/admin/accounts` | GET | 列出所有账号 |
-| `/admin/accounts/:id` | GET | 获取账号详情 |
-| `/admin/accounts` | POST | 添加新账号 |
-| `/admin/accounts/:id` | PUT | 更新账号 |
-| `/admin/accounts/:id` | DELETE | 删除账号 |
-| `/admin/accounts/:id/reset` | POST | 重置限流计数 |
-| `/admin/stats` | GET | JSON 统计数据 |
-| `/admin/providers` | GET | 列出 Provider |
-| `/admin/reload` | POST | 重新加载配置 |
-| `/admin/health` | GET | 详细健康检查 |
+| 端点 | 方法 | 认证 | 描述 |
+|-----|------|------|------|
+| `/` | GET | 无 | 管理后台首页 |
+| `/dashboard` | GET | 无 | 管理后台 |
+| `/admin/accounts` | GET | API Key | 列出所有账号 |
+| `/admin/accounts/:id` | GET | API Key | 获取账号详情 |
+| `/admin/accounts` | POST | API Key | 添加新账号 |
+| `/admin/accounts/:id` | PUT | API Key | 更新账号 |
+| `/admin/accounts/:id` | DELETE | API Key | 删除账号 |
+| `/admin/accounts/:id/reset` | POST | API Key | 重置限流计数 |
+| `/admin/api-keys` | GET | API Key | 列出 API Key |
+| `/admin/api-keys` | POST | API Key | 创建 API Key |
+| `/admin/stats` | GET | API Key | JSON 统计数据 |
+| `/admin/stats/timeseries` | GET | API Key | 时序数据 |
+| `/admin/providers` | GET | API Key | 列出 Provider |
+| `/admin/logs` | GET | API Key | 最近请求日志 |
+| `/admin/reload` | POST | API Key | 重新加载配置 |
+| `/admin/export/:type` | GET | API Key | 导出数据 (json/csv) |
+
+> **安全提示**：管理 API 端点需要认证。请配置 `admin.api_keys` 以保护这些端点。
 
 ## 使用示例
 
@@ -212,24 +222,24 @@ curl http://localhost:8080/v1/models \
 ### 管理：获取账号统计
 
 ```bash
-curl http://localhost:8081/admin/accounts \
-  -H "X-Admin-Key: your-admin-key"
+curl http://localhost:8080/admin/accounts \
+  -H "Authorization: Bearer your-admin-key"
 ```
 
 ### 管理：重载配置
 
 ```bash
-curl -X POST http://localhost:8081/admin/reload \
-  -H "X-Admin-Key: your-admin-key"
+curl -X POST http://localhost:8080/admin/reload \
+  -H "Authorization: Bearer your-admin-key"
 ```
 
 ## 架构图
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     AIProxy                              │
+│                  AIProxy (端口 8080)                     │
 ├─────────────────────────────────────────────────────────┤
-│  公开 API (8080)                                        │
+│  公开 API                                                │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐                │
 │  │  代理    │ │  路由    │ │  模型    │                │
 │  └────┬─────┘ └────┬─────┘ └──────────┘                │
@@ -242,7 +252,7 @@ curl -X POST http://localhost:8081/admin/reload \
 │  │   SQLite 存储        │                              │
 │  └──────────────────────┘                              │
 ├─────────────────────────────────────────────────────────┤
-│  管理 API (8081)                                        │
+│  管理后台 & API (/admin/*)                               │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐                │
 │  │  账号    │ │  统计    │ │  配置    │                │
 │  └──────────┘ └──────────┘ └──────────┘                │

@@ -694,7 +694,7 @@ func (s *SQLite) GetAllAccountStats(ctx context.Context, since time.Time) ([]*Ac
 	for rows.Next() {
 		var st AccountStats
 		var avgLatency, avgTTFT, successRate sql.NullFloat64
-		var lastUsed sql.NullTime
+		var lastUsed sql.NullString
 		err := rows.Scan(&st.AccountID, &st.RequestCount, &st.ErrorCount, &st.TotalTokens, &avgLatency, &avgTTFT, &successRate, &lastUsed)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan account stats: %w", err)
@@ -708,8 +708,10 @@ func (s *SQLite) GetAllAccountStats(ctx context.Context, since time.Time) ([]*Ac
 		if successRate.Valid {
 			st.SuccessRate = successRate.Float64
 		}
-		if lastUsed.Valid {
-			st.LastUsedAt = &lastUsed.Time
+		if lastUsed.Valid && lastUsed.String != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05", lastUsed.String); err == nil {
+				st.LastUsedAt = &t
+			}
 		}
 		stats = append(stats, &st)
 	}

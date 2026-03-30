@@ -132,31 +132,20 @@ func (s *Server) run(configPath string) error {
 
 	publicServer, err := s.setupPublicAPI()
 	if err != nil {
-		return fmt.Errorf("failed to setup public API: %w", err)
+		return fmt.Errorf("failed to setup API: %w", err)
 	}
 
-	adminServer, err := s.setupAdminAPI()
-	if err != nil {
-		return fmt.Errorf("failed to setup admin API: %w", err)
-	}
-
-	errChan := make(chan error, 2)
+	errChan := make(chan error, 1)
 
 	go func() {
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-		slog.Info("starting public API server", "address", addr)
+		if cfg.Admin.Enabled {
+			slog.Info("starting API server (public + admin merged)", "address", addr)
+		} else {
+			slog.Info("starting public API server", "address", addr)
+		}
 		if err := publicServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("public API server error: %w", err)
-		}
-	}()
-
-	go func() {
-		if !cfg.Admin.Enabled {
-			return
-		}
-		slog.Info("starting admin API server", "address", cfg.Admin.Listen)
-		if err := adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("admin API server error: %w", err)
+			errChan <- fmt.Errorf("API server error: %w", err)
 		}
 	}()
 
@@ -178,16 +167,10 @@ func (s *Server) run(configPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	slog.Info("shutting down servers", "timeout", shutdownTimeout)
+	slog.Info("shutting down server", "timeout", shutdownTimeout)
 
 	if err := publicServer.Shutdown(ctx); err != nil {
-		slog.Error("failed to shutdown public API server", "error", err)
-	}
-
-	if cfg.Admin.Enabled {
-		if err := adminServer.Shutdown(ctx); err != nil {
-			slog.Error("failed to shutdown admin API server", "error", err)
-		}
+		slog.Error("failed to shutdown server", "error", err)
 	}
 
 	slog.Info("server shutdown complete")
@@ -516,6 +499,21 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 		IncludeResponseBody: s.config.Logging.IncludeResponseBody,
 	}))
 
+	engine.GET("/health", s.handleHealth)
+	engine.GET("/ready", s.handleReady)
+
+	if s.config.Metrics.Enabled && s.config.Metrics.Prometheus.Enabled {
+		statsHandler := stats.NewHandler(s.statsReporter)
+		engine.GET(s.config.Metrics.Prometheus.Path, gin.WrapH(http.HandlerFunc(statsHandler.ServePrometheus)))
+	}
+
+	if s.config.Admin.Enabled {
+		engine.GET("/", s.handleDashboard)
+		engine.GET("/dashboard", s.handleDashboard)
+		engine.GET("/css/:filename", s.handleCSSFiles)
+		engine.GET("/js/:filename", s.handleJSFiles)
+	}
+
 	authConfig := &middleware.AuthConfig{
 		Enabled:    len(s.config.Auth.APIKeys) > 0 || s.storage != nil,
 		APIKeys:    make(map[string]bool),
@@ -526,17 +524,52 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 	for _, key := range s.config.Auth.APIKeys {
 		authConfig.APIKeys[key] = true
 	}
-	engine.Use(middleware.Auth(authConfig))
-	engine.Use(middleware.UpdateAPIKeyUsage(authConfig))
 
-	engine.POST("/v1/chat/completions", s.handleChatCompletions)
-	engine.GET("/v1/models", s.handleListModels)
-	engine.GET("/health", s.handleHealth)
-	engine.GET("/ready", s.handleReady)
+	apiGroup := engine.Group("")
+	apiGroup.Use(middleware.Auth(authConfig))
+	apiGroup.Use(middleware.UpdateAPIKeyUsage(authConfig))
+	apiGroup.POST("/v1/chat/completions", s.handleChatCompletions)
+	apiGroup.GET("/v1/models", s.handleListModels)
 
-	if s.config.Metrics.Enabled && s.config.Metrics.Prometheus.Enabled {
-		statsHandler := stats.NewHandler(s.statsReporter)
-		engine.GET(s.config.Metrics.Prometheus.Path, gin.WrapH(http.HandlerFunc(statsHandler.ServePrometheus)))
+	if s.config.Admin.Enabled {
+		adminAuth := &middleware.AuthConfig{
+			Enabled:    len(s.config.Admin.APIKeys) > 0,
+			APIKeys:    make(map[string]bool),
+			HeaderName: "Authorization",
+			KeyPrefix:  "Bearer ",
+		}
+		for _, key := range s.config.Admin.APIKeys {
+			adminAuth.APIKeys[key] = true
+		}
+
+		adminGroup := engine.Group("/admin")
+		adminGroup.Use(middleware.Auth(adminAuth))
+		adminGroup.GET("/accounts", s.handleAdminListAccounts)
+		adminGroup.GET("/accounts/:id", s.handleAdminGetAccount)
+		adminGroup.GET("/accounts/:id/limits", s.handleAdminGetAccountLimits)
+		adminGroup.GET("/accounts/:id/models", s.handleAdminAccountModelStats)
+		adminGroup.POST("/accounts", s.handleAdminCreateAccount)
+		adminGroup.PUT("/accounts/:id", s.handleAdminUpdateAccount)
+		adminGroup.DELETE("/accounts/:id", s.handleAdminDeleteAccount)
+		adminGroup.POST("/accounts/:id/reset", s.handleAdminResetAccount)
+		adminGroup.POST("/accounts/batch", s.handleAdminBatchAccountOperation)
+		adminGroup.GET("/api-keys", s.handleAdminListAPIKeys)
+		adminGroup.POST("/api-keys", s.handleAdminCreateAPIKey)
+		adminGroup.DELETE("/api-keys/:id", s.handleAdminDeleteAPIKey)
+		adminGroup.PUT("/api-keys/:id/toggle", s.handleAdminToggleAPIKey)
+		adminGroup.GET("/stats", s.handleAdminStatsFromDB)
+		adminGroup.GET("/stats/timeseries", s.handleAdminTimeSeries)
+		adminGroup.GET("/stats/accounts", s.handleAdminAllAccountStats)
+		adminGroup.GET("/stats/models", s.handleAdminModelStats)
+		adminGroup.GET("/providers", s.handleAdminListProviders)
+		adminGroup.GET("/providers/stats", s.handleAdminProviderStats)
+		adminGroup.GET("/logs", s.handleAdminLogs)
+		adminGroup.GET("/logs/:id", s.handleAdminLogDetail)
+		adminGroup.GET("/version", s.handleAdminVersion)
+		adminGroup.GET("/model-mapping", s.handleAdminModelMapping)
+		adminGroup.GET("/export/:type", s.handleAdminExport)
+		adminGroup.POST("/reload", s.handleAdminReload)
+		adminGroup.GET("/health", s.handleHealth)
 	}
 
 	readTimeout, _ := time.ParseDuration(s.config.Server.ReadTimeout)
@@ -549,72 +582,6 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,
-	}
-
-	return server, nil
-}
-
-func (s *Server) setupAdminAPI() (*http.Server, error) {
-	if !s.config.Admin.Enabled {
-		return &http.Server{}, nil
-	}
-
-	gin.SetMode(gin.ReleaseMode)
-	engine := gin.New()
-
-	engine.Use(middleware.Recovery())
-	engine.Use(middleware.RequestID(&middleware.RequestIDConfig{
-		HeaderName:        "X-Request-ID",
-		GenerateIfMissing: true,
-	}))
-
-	engine.GET("/", s.handleDashboard)
-	engine.GET("/dashboard", s.handleDashboard)
-	engine.GET("/css/:filename", s.handleCSSFiles)
-	engine.GET("/js/:filename", s.handleJSFiles)
-
-	adminAuth := &middleware.AuthConfig{
-		Enabled:    len(s.config.Admin.APIKeys) > 0,
-		APIKeys:    make(map[string]bool),
-		HeaderName: "Authorization",
-		KeyPrefix:  "Bearer ",
-	}
-	for _, key := range s.config.Admin.APIKeys {
-		adminAuth.APIKeys[key] = true
-	}
-
-	adminGroup := engine.Group("")
-	adminGroup.Use(middleware.Auth(adminAuth))
-	adminGroup.GET("/admin/accounts", s.handleAdminListAccounts)
-	adminGroup.GET("/admin/accounts/:id", s.handleAdminGetAccount)
-	adminGroup.GET("/admin/accounts/:id/limits", s.handleAdminGetAccountLimits)
-	adminGroup.GET("/admin/accounts/:id/models", s.handleAdminAccountModelStats)
-	adminGroup.POST("/admin/accounts", s.handleAdminCreateAccount)
-	adminGroup.PUT("/admin/accounts/:id", s.handleAdminUpdateAccount)
-	adminGroup.DELETE("/admin/accounts/:id", s.handleAdminDeleteAccount)
-	adminGroup.POST("/admin/accounts/:id/reset", s.handleAdminResetAccount)
-	adminGroup.POST("/admin/accounts/batch", s.handleAdminBatchAccountOperation)
-	adminGroup.GET("/admin/api-keys", s.handleAdminListAPIKeys)
-	adminGroup.POST("/admin/api-keys", s.handleAdminCreateAPIKey)
-	adminGroup.DELETE("/admin/api-keys/:id", s.handleAdminDeleteAPIKey)
-	adminGroup.PUT("/admin/api-keys/:id/toggle", s.handleAdminToggleAPIKey)
-	adminGroup.GET("/admin/stats", s.handleAdminStatsFromDB)
-	adminGroup.GET("/admin/stats/timeseries", s.handleAdminTimeSeries)
-	adminGroup.GET("/admin/stats/accounts", s.handleAdminAllAccountStats)
-	adminGroup.GET("/admin/stats/models", s.handleAdminModelStats)
-	adminGroup.GET("/admin/providers", s.handleAdminListProviders)
-	adminGroup.GET("/admin/providers/stats", s.handleAdminProviderStats)
-	adminGroup.GET("/admin/logs", s.handleAdminLogs)
-	adminGroup.GET("/admin/logs/:id", s.handleAdminLogDetail)
-	adminGroup.GET("/admin/version", s.handleAdminVersion)
-	adminGroup.GET("/admin/model-mapping", s.handleAdminModelMapping)
-	adminGroup.GET("/admin/export/:type", s.handleAdminExport)
-	adminGroup.POST("/admin/reload", s.handleAdminReload)
-	adminGroup.GET("/admin/health", s.handleHealth)
-
-	server := &http.Server{
-		Addr:    s.config.Admin.Listen,
-		Handler: engine,
 	}
 
 	return server, nil

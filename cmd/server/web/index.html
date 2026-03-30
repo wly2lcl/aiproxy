@@ -462,8 +462,7 @@
             <div class="space-y-2">
               <div class="flex justify-between p-3 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('version') }}</span><span class="font-mono text-sm">{{ version.version }}</span></div>
               <div class="flex justify-between p-3 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('buildTime') }}</span><span class="text-sm">{{ version.build_time }}</span></div>
-              <div class="flex justify-between p-3 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('adminAPI') }}</span><span class="font-mono text-sm">localhost:8081</span></div>
-              <div class="flex justify-between p-3 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('publicAPI') }}</span><span class="font-mono text-sm">localhost:8080</span></div>
+              <div class="flex justify-between p-3 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('apiEndpoint') }}</span><span class="font-mono text-sm">localhost:8080</span></div>
               <div class="flex justify-between p-3 bg-gray-700/50 rounded"><span class="text-gray-400">{{ t('healthStatus') }}</span><span :class="healthStatus==='healthy'?'text-green-400':'text-red-400'">{{ healthStatus || t('unknown') }}</span></div>
             </div>
           </div>

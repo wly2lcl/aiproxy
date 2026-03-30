@@ -174,9 +174,6 @@ func TestApplyDefaults(t *testing.T) {
 		t.Errorf("Auth.KeyPrefix default = %q, want %q", cfg.Auth.KeyPrefix, "Bearer ")
 	}
 
-	if cfg.Admin.Listen != "127.0.0.1:8081" {
-		t.Errorf("Admin.Listen default = %q, want %q", cfg.Admin.Listen, "127.0.0.1:8081")
-	}
 	if cfg.Admin.RateLimit != 100 {
 		t.Errorf("Admin.RateLimit default = %d, want %d", cfg.Admin.RateLimit, 100)
 	}
@@ -763,7 +760,7 @@ func TestValidate(t *testing.T) {
 				cfg := &Config{
 					Logging:  LoggingConfig{Level: "info", Format: "json", Output: "stdout"},
 					Auth:     AuthConfig{HeaderName: "Authorization"},
-					Admin:    AdminConfig{Enabled: true, APIKeys: []string{}, Listen: "127.0.0.1:8081"},
+					Admin:    AdminConfig{Enabled: true, APIKeys: []string{}},
 					Database: DatabaseConfig{Path: "test.db", JournalMode: "WAL", AutoVacuum: "INCREMENTAL"},
 					Providers: []ProviderConfig{
 						{
@@ -1070,7 +1067,6 @@ func TestConfigJSONTags(t *testing.T) {
 		},
 		"admin": {
 			"enabled": true,
-			"listen": "127.0.0.1:8081",
 			"api_keys": ["admin-key"],
 			"rate_limit": 100
 		},
@@ -1165,9 +1161,6 @@ func TestConfigJSONTags(t *testing.T) {
 	}
 	if !cfg.Admin.Enabled {
 		t.Errorf("Admin.Enabled = %v, want %v", cfg.Admin.Enabled, true)
-	}
-	if cfg.Admin.Listen != "127.0.0.1:8081" {
-		t.Errorf("Admin.Listen = %q, want %q", cfg.Admin.Listen, "127.0.0.1:8081")
 	}
 	if !cfg.Metrics.Enabled {
 		t.Errorf("Metrics.Enabled = %v, want %v", cfg.Metrics.Enabled, true)

@@ -14,7 +14,7 @@ A high-performance multi-account LLM API gateway with intelligent load balancing
 - **SQLite Persistence**: Rate limit state survives restarts (WAL mode)
 - **Streaming Support**: Full SSE streaming for real-time responses
 - **Token Tracking**: Hybrid mode for accurate streaming token counting (estimates tokens if upstream usage metadata is missing)
-- **Admin API**: Separate management interface on localhost
+- **Admin Dashboard**: Built-in web UI for monitoring and management
 - **Prometheus Metrics**: Built-in observability
 - **Graceful Shutdown**: Zero-downtime restarts
 
@@ -88,15 +88,15 @@ See [config/config.example.json](config/config.example.json) for a complete conf
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `server.port` | Public API port | 8080 |
-| `server.host` | Public API host | 0.0.0.0 |
+| `server.port` | API server port (public + admin merged) | 8080 |
+| `server.host` | API server host | 0.0.0.0 |
 | `database.path` | SQLite database path | data/aiproxy.db |
 | `database.max_open_conns` | SQLite max open connections | 25 |
 | `database.max_idle_conns` | SQLite max idle connections | 25 |
 | `auth.enabled` | Enable API key authentication | false |
 | `auth.api_keys` | List of valid API keys | [] |
-| `admin.enabled` | Enable admin API | true |
-| `admin.listen` | Admin API address | 127.0.0.1:8081 |
+| `admin.enabled` | Enable admin API and dashboard | true |
+| `admin.api_keys` | Admin API authentication keys (required for security) | [] |
 
 ### Provider Configuration
 
@@ -152,7 +152,9 @@ export AIPROXY_LOGGING_LEVEL=debug
 
 ## API Endpoints
 
-### Public API (Port 8080)
+All endpoints are served on port 8080.
+
+### Public API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -162,20 +164,28 @@ export AIPROXY_LOGGING_LEVEL=debug
 | `/ready` | GET | Readiness check |
 | `/metrics` | GET | Prometheus metrics |
 
-### Admin API (Port 8081, localhost only)
+### Admin API & Dashboard
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/admin/accounts` | GET | List all accounts |
-| `/admin/accounts/:id` | GET | Get account details |
-| `/admin/accounts` | POST | Add new account |
-| `/admin/accounts/:id` | PUT | Update account |
-| `/admin/accounts/:id` | DELETE | Delete account |
-| `/admin/accounts/:id/reset` | POST | Reset rate limits |
-| `/admin/stats` | GET | JSON statistics |
-| `/admin/providers` | GET | List providers |
-| `/admin/reload` | POST | Reload configuration |
-| `/admin/health` | GET | Detailed health check |
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/` | GET | None | Admin dashboard |
+| `/dashboard` | GET | None | Admin dashboard |
+| `/admin/accounts` | GET | API Key | List all accounts |
+| `/admin/accounts/:id` | GET | API Key | Get account details |
+| `/admin/accounts` | POST | API Key | Add new account |
+| `/admin/accounts/:id` | PUT | API Key | Update account |
+| `/admin/accounts/:id` | DELETE | API Key | Delete account |
+| `/admin/accounts/:id/reset` | POST | API Key | Reset rate limits |
+| `/admin/api-keys` | GET | API Key | List API keys |
+| `/admin/api-keys` | POST | API Key | Create API key |
+| `/admin/stats` | GET | API Key | JSON statistics |
+| `/admin/stats/timeseries` | GET | API Key | Time series data |
+| `/admin/providers` | GET | API Key | List providers |
+| `/admin/logs` | GET | API Key | Recent request logs |
+| `/admin/reload` | POST | API Key | Reload configuration |
+| `/admin/export/:type` | GET | API Key | Export data (json/csv) |
+
+> **Security Note**: Admin API endpoints require authentication. Configure `admin.api_keys` to protect these endpoints.
 
 ## Usage Examples
 
@@ -214,24 +224,24 @@ curl http://localhost:8080/v1/models \
 ### Admin: Get Account Stats
 
 ```bash
-curl http://localhost:8081/admin/accounts \
-  -H "X-Admin-Key: your-admin-key"
+curl http://localhost:8080/admin/accounts \
+  -H "Authorization: Bearer your-admin-key"
 ```
 
 ### Admin: Reload Configuration
 
 ```bash
-curl -X POST http://localhost:8081/admin/reload \
-  -H "X-Admin-Key: your-admin-key"
+curl -X POST http://localhost:8080/admin/reload \
+  -H "Authorization: Bearer your-admin-key"
 ```
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     AIProxy                              │
+│                     AIProxy (Port 8080)                  │
 ├─────────────────────────────────────────────────────────┤
-│  Public API (8080)                                      │
+│  Public API                                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐                │
 │  │  Proxy   │ │  Router  │ │  Models  │                │
 │  └────┬─────┘ └────┬─────┘ └──────────┘                │
@@ -244,7 +254,7 @@ curl -X POST http://localhost:8081/admin/reload \
 │  │   SQLite Storage     │                              │
 │  └──────────────────────┘                              │
 ├─────────────────────────────────────────────────────────┤
-│  Admin API (8081)                                       │
+│  Admin Dashboard & API (/admin/*)                       │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐                │
 │  │ Accounts │ │  Stats   │ │  Config  │                │
 │  └──────────┘ └──────────┘ └──────────┘                │

@@ -272,10 +272,7 @@ func validateFallbackConfig(cfg *FallbackConfig) error {
 
 func validateAdminConfig(cfg *AdminConfig) error {
 	if cfg.Enabled && len(cfg.APIKeys) == 0 {
-		return newConfigError("admin.api_keys", "is required when admin is enabled", nil)
-	}
-	if cfg.Enabled && cfg.Listen == "" {
-		return newConfigError("admin.listen", "is required when admin is enabled", cfg.Listen)
+		return newConfigError("admin.api_keys", "is required when admin is enabled (for security)", nil)
 	}
 	if cfg.RateLimit < 0 {
 		return newConfigError("admin.rate_limit", "must be non-negative", cfg.RateLimit)

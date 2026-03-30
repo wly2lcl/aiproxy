@@ -196,7 +196,6 @@
   },
   "admin": {
     "enabled": true,
-    "listen": "127.0.0.1:8081",
     "api_keys": [
       "admin-secret-key-1"
     ],

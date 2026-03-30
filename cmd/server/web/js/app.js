@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8081'
+const API_BASE = ''
 
 const app = Vue.createApp({
   data() {

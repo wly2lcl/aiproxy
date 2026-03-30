@@ -288,12 +288,15 @@ vim config/config.json
 
 ### 管理 API (`admin`)
 
+管理 API 与公共 API 共用同一端口（8080），通过 `/admin/*` 路径访问。
+
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `enabled` | bool | `true` | 是否启用管理API |
-| `listen` | string | `127.0.0.1:8081` | 监听地址（建议仅本地） |
-| `api_keys` | []string | `[]` | 管理API密钥 |
+| `enabled` | bool | `true` | 是否启用管理API和后台 |
+| `api_keys` | []string | `[]` | 管理API密钥（启用时**必须配置**，用于认证保护） |
 | `rate_limit` | int | `100` | 每分钟请求限制 |
+
+> **安全提示**：管理 API 暴露在公网，必须配置 `api_keys` 进行认证保护。
 
 ---
 

@@ -86,7 +86,6 @@ type FallbackConfig struct {
 
 type AdminConfig struct {
 	Enabled   bool     `json:"enabled"`
-	Listen    string   `json:"listen"`
 	APIKeys   []string `json:"api_keys"`
 	RateLimit int      `json:"rate_limit"`
 }

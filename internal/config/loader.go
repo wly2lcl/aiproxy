@@ -128,9 +128,6 @@ func ApplyDefaults(cfg *Config) {
 		cfg.Fallback.Strategy = "sequential"
 	}
 
-	if cfg.Admin.Listen == "" {
-		cfg.Admin.Listen = "127.0.0.1:8081"
-	}
 	if cfg.Admin.RateLimit == 0 {
 		cfg.Admin.RateLimit = 100
 	}
@@ -195,7 +192,6 @@ func ApplyEnvironmentOverrides(cfg *Config) {
 	applyEnvStringSlice("AIPROXY_FALLBACK_PROVIDERS", &cfg.Fallback.Providers)
 
 	applyEnvBool("AIPROXY_ADMIN_ENABLED", &cfg.Admin.Enabled)
-	applyEnvString("AIPROXY_ADMIN_LISTEN", &cfg.Admin.Listen)
 	applyEnvStringSlice("AIPROXY_ADMIN_API_KEYS", &cfg.Admin.APIKeys)
 	applyEnvInt("AIPROXY_ADMIN_RATE_LIMIT", &cfg.Admin.RateLimit)
 
