@@ -42,6 +42,8 @@ type Storage interface {
 	GetRateLimit(ctx context.Context, accountID string, limitType domain.LimitType) (*domain.LimitState, error)
 	IncrementRateLimit(ctx context.Context, accountID string, limitType domain.LimitType, delta int) error
 	ResetRateLimit(ctx context.Context, accountID string, limitType domain.LimitType) error
+	UpdateAccountLastUsed(ctx context.Context, accountID string) error
+	GetAllAccountLastUsed(ctx context.Context) (map[string]time.Time, error)
 
 	RecordTokenUsage(ctx context.Context, usage *TokenUsage) error
 	GetTokenUsage(ctx context.Context, accountID string, since time.Time) (*TokenUsageSummary, error)

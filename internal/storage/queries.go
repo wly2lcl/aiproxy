@@ -48,6 +48,10 @@ FROM accounts
 WHERE provider_id = ?
 ORDER BY priority DESC, weight DESC, id`
 
+	getAllAccountLastUsedQuery = `
+SELECT id, last_used_at
+FROM accounts`
+
 	getRateLimitQuery = `
 SELECT limit_type, max_value, current_value, window_start, window_end
 FROM account_limits

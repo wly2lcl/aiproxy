@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/wangluyao/aiproxy/pkg/openai"
 )
@@ -13,6 +14,8 @@ import (
 type StreamHandler struct {
 	proxy          *Proxy
 	tokenExtractor *TokenExtractor
+	ttft           time.Duration
+	ttftRecorded   bool
 }
 
 func NewStreamHandler(proxy *Proxy) *StreamHandler {
@@ -27,6 +30,10 @@ func NewStreamHandlerWithConfig(proxy *Proxy, charsPerToken int, streamingMode s
 		proxy:          proxy,
 		tokenExtractor: NewTokenExtractorWithConfig(charsPerToken, streamingMode),
 	}
+}
+
+func (h *StreamHandler) GetTTFT() time.Duration {
+	return h.ttft
 }
 
 type flushWriter struct {
@@ -60,7 +67,7 @@ func isUnexpectedEOF(err error) bool {
 	return err != nil && (err == io.ErrUnexpectedEOF || strings.Contains(err.Error(), "unexpected EOF"))
 }
 
-func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request, upstreamResp *http.Response) error {
+func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request, upstreamResp *http.Response, startTime time.Time) error {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -106,6 +113,11 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request, upst
 		}
 
 		bytesRead += int64(len(line))
+
+		if !h.ttftRecorded && strings.HasPrefix(line, "data:") {
+			h.ttft = time.Since(startTime)
+			h.ttftRecorded = true
+		}
 
 		if _, err := fw.Write([]byte(line)); err != nil {
 			return &StreamError{

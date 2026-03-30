@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wangluyao/aiproxy/pkg/openai"
 )
@@ -184,7 +185,7 @@ func TestStreamHandler_ServeStream(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 		handler := NewStreamHandler(nil)
-		err := handler.ServeStream(recorder, req, upstreamResp)
+		err := handler.ServeStream(recorder, req, upstreamResp, time.Now())
 		if err != nil {
 			t.Fatalf("ServeStream failed: %v", err)
 		}
@@ -224,7 +225,7 @@ func TestStreamHandler_ServeStream(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 		handler := NewStreamHandler(nil)
-		err := handler.ServeStream(recorder, req, upstreamResp)
+		err := handler.ServeStream(recorder, req, upstreamResp, time.Now())
 		if err != nil {
 			t.Fatalf("ServeStream failed: %v", err)
 		}
@@ -255,7 +256,7 @@ func TestStreamHandler_ChunkPassthrough(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 	handler := NewStreamHandler(nil)
-	err := handler.ServeStream(recorder, req, upstreamResp)
+	err := handler.ServeStream(recorder, req, upstreamResp, time.Now())
 	if err != nil {
 		t.Fatalf("ServeStream failed: %v", err)
 	}
@@ -285,7 +286,7 @@ func TestStreamHandler_DoneMarker(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 	handler := NewStreamHandler(nil)
-	err := handler.ServeStream(recorder, req, upstreamResp)
+	err := handler.ServeStream(recorder, req, upstreamResp, time.Now())
 	if err != nil {
 		t.Fatalf("ServeStream failed: %v", err)
 	}

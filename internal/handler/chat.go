@@ -192,7 +192,7 @@ func (h *ChatHandler) handleStream(c *gin.Context, resp *http.Response, account 
 	c.Header("Connection", "keep-alive")
 
 	streamHandler := proxy.NewStreamHandler(h.proxy)
-	err := streamHandler.ServeStream(c.Writer, c.Request, resp)
+	err := streamHandler.ServeStream(c.Writer, c.Request, resp, startTime)
 	if err != nil {
 		h.logger.Error("stream error", "error", err)
 	}
@@ -245,8 +245,6 @@ func (h *ChatHandler) handleNonStream(c *gin.Context, resp *http.Response, accou
 		h.recordUsage(prov.Name(), req.Model, resp.StatusCode, latency, 0)
 	}
 }
-
-
 
 func (h *ChatHandler) recordUsage(providerName, model string, status int, latency time.Duration, tokens int) {
 	if h.collector != nil {

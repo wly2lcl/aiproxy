@@ -333,6 +333,45 @@ func (s *SQLite) ResetRateLimit(ctx context.Context, accountID string, limitType
 	return nil
 }
 
+func (s *SQLite) UpdateAccountLastUsed(ctx context.Context, accountID string) error {
+	if accountID == "" {
+		return fmt.Errorf("account id cannot be empty")
+	}
+
+	_, err := s.db.ExecContext(ctx, updateAccountLastUsedQuery, accountID)
+	if err != nil {
+		return fmt.Errorf("failed to update account last used: %w", err)
+	}
+
+	return nil
+}
+
+func (s *SQLite) GetAllAccountLastUsed(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx, getAllAccountLastUsedQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account last used: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]time.Time)
+	for rows.Next() {
+		var id string
+		var lastUsedAt sql.NullTime
+		if err := rows.Scan(&id, &lastUsedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan account last used: %w", err)
+		}
+		if lastUsedAt.Valid {
+			result[id] = lastUsedAt.Time
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating account last used: %w", err)
+	}
+
+	return result, nil
+}
+
 func (s *SQLite) RecordTokenUsage(ctx context.Context, usage *TokenUsage) error {
 	if usage == nil {
 		return fmt.Errorf("usage cannot be nil")

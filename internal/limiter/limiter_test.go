@@ -122,6 +122,14 @@ func (m *mockStorage) CleanupExpiredRateLimits(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockStorage) UpdateAccountLastUsed(ctx context.Context, accountID string) error {
+	return nil
+}
+
+func (m *mockStorage) GetAllAccountLastUsed(ctx context.Context) (map[string]time.Time, error) {
+	return make(map[string]time.Time), nil
+}
+
 func TestRPM_Allow_UnderLimit(t *testing.T) {
 	store := newMockStorage()
 	limiter := NewRPM(store, 10)

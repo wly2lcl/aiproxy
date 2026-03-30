@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIProxy Dashboard</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    [v-cloak] { display: none; }
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    .slide-enter-active, .slide-leave-active { transition: transform 0.3s ease; }
+    .slide-enter-from, .slide-leave-to { transform: translateX(-100%); }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1f2937; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+  </style>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: '#3b82f6',
+            success: '#22c55e',
+            warning: '#f59e0b',
+            danger: '#ef4444',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+  <div id="app" v-cloak>
+    <!-- Toast Notifications -->
+    <div class="fixed top-4 right-4 z-50 space-y-2">
+      <transition-group name="fade">
+        <div v-for="toast in toasts" :key="toast.id"
+             :class="[
+               'px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 min-w-[300px]',
+               toast.type === 'success' ? 'bg-green-600' : 
+               toast.type === 'error' ? 'bg-red-600' : 
+               toast.type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600'
+             ]">
+          <svg v-if="toast.type === 'success'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          <svg v-else-if="toast.type === 'error'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+          <span>{{ toast.message }}</span>
+          <button @click="removeToast(toast.id)" class="ml-auto hover:opacity-75">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </transition-group>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div v-if="confirmModal.show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+        <h3 class="text-lg font-semibold mb-4">{{ confirmModal.title }}</h3>
+        <p class="text-gray-300 mb-6">{{ confirmModal.message }}</p>
+        <div class="flex justify-end gap-3">
+          <button @click="confirmModal.onCancel" 
+                  class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition">
+            {{ t('cancel') }}
+          </button>
+          <button @click="confirmModal.onConfirm"
+                  class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg transition">
+            {{ t('confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Account Modal -->
+    <div v-if="accountModal.show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-gray-800 rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-semibold mb-4">{{ accountModal.isEdit ? t('editAccount') : t('addAccountTitle') }}</h3>
+        <form @submit.prevent="saveAccount">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">{{ t('accountID') }}</label>
+              <input v-model="accountModal.form.id" type="text" 
+                     :disabled="accountModal.isEdit"
+                     :class="['w-full px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none', 
+                              accountModal.isEdit ? 'opacity-50 cursor-not-allowed' : '']"
+                     :placeholder="t('autoGenID')">
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">{{ t('provider') }} *</label>
+              <select v-model="accountModal.form.provider_id" required
+                      class="w-full px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none">
+                <option value="">{{ t('selectProvider') }}</option>
+                <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.id }}</option>
+              </select>
+            </div>
+            <div v-if="!accountModal.isEdit">
+              <label class="block text-sm font-medium mb-1">{{ t('apiKey') }} *</label>
+              <input v-model="accountModal.form.api_key" type="password" required
+                     class="w-full px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+                     :placeholder="t('enterApiKey')">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium mb-1">{{ t('weightLabel') }}</label>
+                <input v-model.number="accountModal.form.weight" type="number" min="0"
+                       class="w-full px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none">
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-1">{{ t('priorityLabel') }}</label>
+                <input v-model.number="accountModal.form.priority" type="number" min="0"
+                       class="w-full px-3 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none">
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <input v-model="accountModal.form.enabled" type="checkbox" id="enabled"
+                     class="w-4 h-4 rounded bg-gray-700 border-gray-600">
+              <label for="enabled" class="text-sm font-medium">{{ t('enabledLabel') }}</label>
+            </div>
+          </div>
+          <div class="flex justify-end gap-3 mt-6">
+            <button type="button" @click="accountModal.show = false"
+                    class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition">
+              {{ t('cancel') }}
+            </button>
+            <button type="submit" :disabled="loading"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition disabled:opacity-50">
+              {{ loading ? t('saving') : t('save') }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Provider Detail Modal -->
+    <div v-if="providerModal.show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-start mb-4">
+          <h3 class="text-lg font-semibold">{{ t('provider') }}: {{ providerModal.provider?.id }}</h3>
+          <button @click="providerModal.show = false" class="text-gray-400 hover:text-white">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div v-if="providerModal.provider" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="text-sm text-gray-400">{{ t('apiBase') }}</label>
+              <p class="font-mono text-sm bg-gray-700 px-2 py-1 rounded">{{ providerModal.provider.api_base }}</p>
+            </div>
+            <div>
+              <label class="text-sm text-gray-400">{{ t('status') }}</label>
+              <p class="flex items-center gap-2">
+                <span :class="['w-2 h-2 rounded-full', providerModal.provider.enabled ? 'bg-green-500' : 'bg-red-500']"></span>
+                {{ providerModal.provider.enabled ? t('enabled') : t('disabled') }}
+              </p>
+            </div>
+            <div>
+              <label class="text-sm text-gray-400">{{ t('default') }}</label>
+              <p>{{ providerModal.provider.is_default ? t('yes') : t('no') }}</p>
+            </div>
+            <div>
+              <label class="text-sm text-gray-400">{{ t('modelsCount') }}</label>
+              <p>{{ providerModal.provider.models?.length || 0 }}</p>
+            </div>
+          </div>
+          <div>
+            <label class="text-sm text-gray-400 block mb-2">{{ t('models') }}</label>
+            <div class="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+              <span v-for="model in providerModal.provider.models" :key="model"
+                    class="px-2 py-1 bg-gray-700 rounded text-xs font-mono">
+                {{ model }}
+              </span>
+              <span v-if="!providerModal.provider.models?.length" class="text-gray-500 text-sm">
+                {{ t('noModelsConfig') }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end mt-6">
+          <button @click="providerModal.show = false"
+                  class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg transition">
+            {{ t('close') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layout -->
+    <div class="flex h-screen">
+      <!-- Sidebar -->
+      <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+        <div class="p-4 border-b border-gray-700">
+          <h1 class="text-xl font-bold text-blue-400">AIProxy</h1>
+          <p class="text-xs text-gray-500">{{ t('dashboard') }}</p>
+        </div>
+        <nav class="flex-1 p-4 space-y-1">
+          <button v-for="item in navItems" :key="item.id"
+                  @click="currentView = item.id"
+                  :class="[
+                    'w-full flex items-center gap-3 px-3 py-2 rounded-lg transition text-left',
+                    currentView === item.id ? 'bg-blue-600 text-white' : 'hover:bg-gray-700 text-gray-300'
+                  ]">
+            <span v-html="item.icon"></span>
+            <span>{{ item.label }}</span>
+          </button>
+        </nav>
+        <div class="p-4 border-t border-gray-700">
+          <div class="text-xs text-gray-500">
+            <p>{{ t('adminAPI') }}: localhost:8081</p>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="flex-1 flex flex-col overflow-hidden">
+        <!-- Header -->
+        <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold">{{ currentViewTitle }}</h2>
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-400">{{ t('adminKeyLabel') }}</label>
+                <input v-model="adminKey" type="password" 
+                       :placeholder="t('enterAdminKey')"
+                       class="px-3 py-1.5 bg-gray-700 rounded border border-gray-600 text-sm focus:border-blue-500 focus:outline-none w-48"
+                       @change="saveAdminKey">
+              </div>
+              <div class="flex items-center gap-2">
+                <span :class="['w-2 h-2 rounded-full', healthStatus === 'healthy' ? 'bg-green-500' : 'bg-red-500']"></span>
+                <span class="text-sm text-gray-400">{{ healthStatus === 'healthy' ? t('healthy') : (healthStatus ? t('unhealthy') : t('checking')) }}</span>
+              </div>
+              <button @click="toggleLang" 
+                      class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition font-medium">
+                {{ lang === 'zh' ? 'EN' : '中文' }}
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <!-- Content Area -->
+        <div class="flex-1 overflow-y-auto p-6">
+          <!-- Dashboard View -->
+          <div v-if="currentView === 'dashboard'">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm text-gray-400">{{ t('totalRequests') }}</p>
+                    <p class="text-2xl font-bold mt-1">{{ formatNumber(stats.total_requests) }}</p>
+                  </div>
+                  <div class="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm text-gray-400">{{ t('totalTokens') }}</p>
+                    <p class="text-2xl font-bold mt-1">{{ formatNumber(stats.total_tokens) }}</p>
+                  </div>
+                  <div class="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm text-gray-400">{{ t('totalErrors') }}</p>
+                    <p class="text-2xl font-bold mt-1">{{ formatNumber(stats.total_errors) }}</p>
+                  </div>
+                  <div class="w-12 h-12 bg-red-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm text-gray-400">{{ t('avgLatency') }}</p>
+                    <p class="text-2xl font-bold mt-1">{{ stats.latency?.avg_ms?.toFixed(1) || 0 }}ms</p>
+                  </div>
+                  <div class="w-12 h-12 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+                    <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Health Status -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-6">
+              <h3 class="text-lg font-semibold mb-4">{{ t('systemHealth') }}</h3>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div v-for="(status, name) in health.checks" :key="name"
+                     class="bg-gray-700/50 rounded-lg p-4">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span :class="['w-2 h-2 rounded-full', status === 'healthy' ? 'bg-green-500' : 'bg-red-500']"></span>
+                    <span class="font-medium capitalize">{{ name }}</span>
+                  </div>
+                  <p class="text-sm text-gray-400">{{ status }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('accountsOverview') }}</h3>
+                <div class="space-y-3">
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">{{ t('totalAccounts') }}</span>
+                    <span class="font-medium">{{ accounts.length }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">{{ t('enabled') }}</span>
+                    <span class="font-medium text-green-400">{{ accounts.filter(a => a.enabled).length }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">{{ t('available') }}</span>
+                    <span class="font-medium text-blue-400">{{ accounts.filter(a => a.available).length }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('providersOverview') }}</h3>
+                <div class="space-y-3">
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">{{ t('totalProviders') }}</span>
+                    <span class="font-medium">{{ providers.length }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">{{ t('enabled') }}</span>
+                    <span class="font-medium text-green-400">{{ providers.filter(p => p.enabled).length }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-400">{{ t('totalModels') }}</span>
+                    <span class="font-medium">{{ providers.reduce((sum, p) => sum + (p.models?.length || 0), 0) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Accounts View -->
+          <div v-if="currentView === 'accounts'">
+            <div class="flex justify-between items-center mb-4">
+              <button @click="openAddAccountModal"
+                      class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                {{ t('addAccount') }}
+              </button>
+              <button @click="fetchAccounts" :disabled="loading"
+                      class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition disabled:opacity-50 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                {{ t('refresh') }}
+              </button>
+            </div>
+            <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-gray-700/50">
+                    <tr>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('id') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('provider') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('status') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('available') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('weight') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('priority') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('limits') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('lastUsed') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('actions') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-700">
+                    <tr v-if="loading" class="animate-pulse">
+                      <td colspan="9" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td>
+                    </tr>
+                    <tr v-else-if="!accounts.length">
+                      <td colspan="9" class="px-4 py-8 text-center text-gray-400">{{ t('noAccounts') }}</td>
+                    </tr>
+                    <tr v-for="account in accounts" :key="account.id" class="hover:bg-gray-700/30">
+                      <td class="px-4 py-3 font-mono text-sm">{{ account.id }}</td>
+                      <td class="px-4 py-3">{{ account.provider }}</td>
+                      <td class="px-4 py-3">
+                        <span :class="['px-2 py-1 rounded text-xs font-medium',
+                                       account.enabled ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400']">
+                          {{ account.enabled ? t('enabled') : t('disabled') }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span :class="['w-2 h-2 rounded-full inline-block', 
+                                       account.available ? 'bg-green-500' : 'bg-red-500']"></span>
+                      </td>
+                      <td class="px-4 py-3">{{ account.weight }}</td>
+                      <td class="px-4 py-3">{{ account.priority }}</td>
+                      <td class="px-4 py-3">
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="(value, key) in account.limits" :key="key"
+                                class="px-1.5 py-0.5 bg-gray-700 rounded text-xs font-mono">
+                            {{ key }}: {{ value }}
+                          </span>
+                          <span v-if="!Object.keys(account.limits || {}).length" class="text-gray-500 text-xs">-</span>
+                        </div>
+                      </td>
+                      <td class="px-4 py-3 text-sm text-gray-400">
+                        {{ account.last_used_at ? formatDate(account.last_used_at) : t('never') }}
+                      </td>
+                      <td class="px-4 py-3">
+                        <div class="flex gap-1">
+                          <button @click="openEditAccountModal(account)"
+                                  class="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded text-xs transition">
+                            {{ t('edit') }}
+                          </button>
+                          <button @click="resetAccountLimits(account.id)"
+                                  class="px-2 py-1 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 rounded text-xs transition">
+                            {{ t('reset') }}
+                          </button>
+                          <button @click="deleteAccount(account.id)"
+                                  class="px-2 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded text-xs transition">
+                            {{ t('delete') }}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Providers View -->
+          <div v-if="currentView === 'providers'">
+            <div class="flex justify-end mb-4">
+              <button @click="fetchProviders" :disabled="loading"
+                      class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition disabled:opacity-50 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                {{ t('refresh') }}
+              </button>
+            </div>
+            <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-gray-700/50">
+                    <tr>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('name') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('apiBase') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('models') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('accounts') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('status') }}</th>
+                      <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">{{ t('actions') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-700">
+                    <tr v-if="loading" class="animate-pulse">
+                      <td colspan="6" class="px-4 py-8 text-center text-gray-400">{{ t('loading') }}</td>
+                    </tr>
+                    <tr v-else-if="!providers.length">
+                      <td colspan="6" class="px-4 py-8 text-center text-gray-400">{{ t('noProviders') }}</td>
+                    </tr>
+                    <tr v-for="provider in providers" :key="provider.id" class="hover:bg-gray-700/30">
+                      <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                          <span class="font-medium">{{ provider.id }}</span>
+                          <span v-if="provider.is_default" class="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs">{{ t('default') }}</span>
+                        </div>
+                      </td>
+                      <td class="px-4 py-3 font-mono text-sm text-gray-400">{{ provider.api_base }}</td>
+                      <td class="px-4 py-3">
+                        <span class="px-2 py-1 bg-gray-700 rounded text-sm">
+                          {{ provider.models?.length || 0 }} {{ t('models') }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span class="px-2 py-1 bg-gray-700 rounded text-sm">
+                          {{ accounts.filter(a => a.provider === provider.id).length }} {{ t('accountsCount') }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span :class="['px-2 py-1 rounded text-xs font-medium',
+                                       provider.enabled ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400']">
+                          {{ provider.enabled ? t('enabled') : t('disabled') }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <button @click="openProviderModal(provider)"
+                                class="px-2 py-1 bg-gray-600/20 hover:bg-gray-600/30 text-gray-300 rounded text-xs transition">
+                          {{ t('viewDetails') }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stats View -->
+          <div v-if="currentView === 'stats'">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <!-- Requests by Provider -->
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('requestsByProvider') }}</h3>
+                <div class="h-64">
+                  <canvas id="requestsChart"></canvas>
+                </div>
+              </div>
+              <!-- Tokens by Provider -->
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('tokensByProvider') }}</h3>
+                <div class="h-64">
+                  <canvas id="tokensChart"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <!-- Latency Stats -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-6">
+              <h3 class="text-lg font-semibold mb-4">{{ t('latencyMetrics') }}</h3>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-gray-700/50 rounded-lg p-4 text-center">
+                  <p class="text-sm text-gray-400">{{ t('average') }}</p>
+                  <p class="text-2xl font-bold mt-1">{{ (stats.latency?.avg_ms || 0).toFixed(1) }}ms</p>
+                </div>
+                <div class="bg-gray-700/50 rounded-lg p-4 text-center">
+                  <p class="text-sm text-gray-400">{{ t('p50') }}</p>
+                  <p class="text-2xl font-bold mt-1">{{ (stats.latency?.p50_ms || 0).toFixed(1) }}ms</p>
+                </div>
+                <div class="bg-gray-700/50 rounded-lg p-4 text-center">
+                  <p class="text-sm text-gray-400">{{ t('p95') }}</p>
+                  <p class="text-2xl font-bold mt-1">{{ (stats.latency?.p95_ms || 0).toFixed(1) }}ms</p>
+                </div>
+                <div class="bg-gray-700/50 rounded-lg p-4 text-center">
+                  <p class="text-sm text-gray-400">{{ t('p99') }}</p>
+                  <p class="text-2xl font-bold mt-1">{{ (stats.latency?.p99_ms || 0).toFixed(1) }}ms</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Error Rate -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-6">
+              <h3 class="text-lg font-semibold mb-4">{{ t('errorRate') }}</h3>
+              <div class="flex items-center gap-4">
+                <div class="flex-1 h-4 bg-gray-700 rounded-full overflow-hidden">
+                  <div class="h-full bg-red-500 transition-all duration-300"
+                       :style="{ width: errorRate + '%' }"></div>
+                </div>
+                <span class="text-lg font-bold">{{ errorRate.toFixed(2) }}%</span>
+              </div>
+              <p class="text-sm text-gray-400 mt-2">
+                {{ formatNumber(stats.total_errors) }} {{ t('errorsOutOf') }} {{ formatNumber(stats.total_requests) }} {{ t('requests') }}
+              </p>
+            </div>
+
+            <!-- Top Models -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+              <h3 class="text-lg font-semibold mb-4">{{ t('topModels') }}</h3>
+              <div class="space-y-2">
+                <div v-for="(count, model) in topModels" :key="model"
+                     class="flex items-center justify-between p-2 bg-gray-700/50 rounded">
+                  <span class="font-mono text-sm">{{ model }}</span>
+                  <span class="text-gray-400">{{ formatNumber(count) }} {{ t('requests') }}</span>
+                </div>
+                <p v-if="!Object.keys(stats.by_model || {}).length" class="text-gray-500 text-center py-4">
+                  {{ t('noData') }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Settings View -->
+          <div v-if="currentView === 'settings'">
+            <div class="max-w-2xl space-y-6">
+              <!-- Configuration -->
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('configuration') }}</h3>
+                <div class="space-y-4">
+                  <div class="flex items-center justify-between p-4 bg-gray-700/50 rounded-lg">
+                    <div>
+                      <h4 class="font-medium">{{ t('reloadConfig') }}</h4>
+                      <p class="text-sm text-gray-400">{{ t('reloadDesc') }}</p>
+                    </div>
+                    <button @click="reloadConfig" :disabled="loading"
+                            class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition disabled:opacity-50">
+                      {{ t('reload') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Health Check -->
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('healthCheck') }}</h3>
+                <div class="space-y-3">
+                  <div v-for="(status, name) in health.checks" :key="name"
+                       class="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <span class="font-medium capitalize">{{ name }}</span>
+                    <div class="flex items-center gap-2">
+                      <span :class="['w-2 h-2 rounded-full', status === 'healthy' ? 'bg-green-500' : 'bg-red-500']"></span>
+                      <span class="text-sm text-gray-400">{{ status }}</span>
+                    </div>
+                  </div>
+                  <div v-if="health.timestamp" class="text-sm text-gray-500 mt-2">
+                    {{ t('lastChecked') }}: {{ formatDate(health.timestamp) }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Server Status -->
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('serverStatus') }}</h3>
+                <div class="space-y-3">
+                  <div class="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <span class="text-gray-400">{{ t('adminAPI') }}</span>
+                    <span class="text-sm font-mono">localhost:8081</span>
+                  </div>
+                  <div class="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <span class="text-gray-400">{{ t('publicAPI') }}</span>
+                    <span class="text-sm font-mono">localhost:8080</span>
+                  </div>
+                  <div class="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <span class="text-gray-400">{{ t('healthStatus') }}</span>
+                    <span :class="['flex items-center gap-2',
+                                   health.status === 'healthy' ? 'text-green-400' : 'text-red-400']">
+                      <span :class="['w-2 h-2 rounded-full', health.status === 'healthy' ? 'bg-green-500' : 'bg-red-500']"></span>
+                      {{ health.status || t('unknown') }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Admin Key -->
+              <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4">{{ t('adminKey') }}</h3>
+                <div class="space-y-3">
+                  <div class="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <span class="text-gray-400">{{ t('currentKey') }}</span>
+                    <span class="text-sm font-mono">{{ adminKey ? '••••••••' + adminKey.slice(-4) : t('notSet') }}</span>
+                  </div>
+                  <div class="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <span class="text-gray-400">{{ t('storedInBrowser') }}</span>
+                    <span class="text-sm">{{ hasStoredKey ? t('yes') : t('no') }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const { createApp } = Vue
+
+    const API_BASE = 'http://localhost:8081'
+
+    createApp({
+      data() {
+        return {
+          currentView: 'dashboard',
+          adminKey: '',
+          hasStoredKey: false,
+          accounts: [],
+          providers: [],
+          stats: {
+            total_requests: 0,
+            total_tokens: 0,
+            total_errors: 0,
+            by_provider: {},
+            by_model: {},
+            tokens_by_provider: {},
+            latency: { avg_ms: 0, p50_ms: 0, p95_ms: 0, p99_ms: 0 }
+          },
+          health: { status: '', timestamp: '', checks: {} },
+          healthStatus: '',
+          loading: false,
+          toasts: [],
+          toastId: 0,
+          charts: {},
+          lang: localStorage.getItem('aiproxy_lang') || 'zh',
+          translations: {
+            zh: {
+              dashboard: '仪表盘',
+              accounts: '账号管理',
+              providers: '服务商',
+              stats: '统计',
+              settings: '设置',
+              totalRequests: '总请求数',
+              totalTokens: '总Token数',
+              totalErrors: '总错误数',
+              avgLatency: '首字节时间',
+              systemHealth: '系统健康状态',
+              accountsOverview: '账号概览',
+              providersOverview: '服务商概览',
+              totalAccounts: '账号总数',
+              enabled: '已启用',
+              available: '可用',
+              totalProviders: '服务商总数',
+              totalModels: '模型总数',
+              addAccount: '添加账号',
+              refresh: '刷新',
+              id: 'ID',
+              provider: '服务商',
+              status: '状态',
+              weight: '权重',
+              priority: '优先级',
+              limits: '限制',
+              lastUsed: '最后使用',
+              actions: '操作',
+              edit: '编辑',
+              reset: '重置',
+              delete: '删除',
+              noAccounts: '暂无账号',
+              loading: '加载中...',
+              models: '模型',
+              default: '默认',
+              viewDetails: '查看详情',
+              noProviders: '暂无服务商',
+              requestsByProvider: '按服务商请求统计',
+              tokensByProvider: '按服务商Token统计',
+              latencyMetrics: '首字节时间(TTFT)',
+              average: '平均值',
+              errorRate: '错误率',
+              errorsOutOf: '个错误，共',
+              requests: '次请求',
+              topModels: '热门模型',
+              noData: '暂无数据',
+              configuration: '配置管理',
+              reloadConfig: '重载配置',
+              reloadDesc: '从磁盘重新加载服务器配置',
+              reload: '重载',
+              healthCheck: '健康检查',
+              lastChecked: '最后检查时间',
+              serverStatus: '服务器状态',
+              adminAPI: '管理API',
+              publicAPI: '公共API',
+              healthStatus: '健康状态',
+              adminKey: '管理密钥',
+              currentKey: '当前密钥',
+              storedInBrowser: '浏览器存储',
+              enterAdminKey: '输入管理密钥',
+              healthy: '健康',
+              unhealthy: '不健康',
+              cancel: '取消',
+              confirm: '确认',
+              save: '保存',
+              accountCreated: '账号创建成功',
+              accountUpdated: '账号更新成功',
+              accountDeleted: '账号删除成功',
+              limitsReset: '限制重置成功',
+              configReloaded: '配置重载成功',
+              selectProvider: '选择服务商',
+              accountID: '账号ID',
+              apiKey: 'API密钥',
+              healthy1: '健康',
+              never: '从未',
+              deleteAccount: '删除账号',
+              deleteAccountMsg: '确定要删除此账号吗？此操作不可撤销。',
+              resetLimits: '重置限制',
+              resetLimitsMsg: '确定要重置此账号所有限制吗？',
+              reloadConfigTitle: '重载配置',
+              reloadConfigMsg: '确定要重载服务器配置吗？这可能会影响正在运行的操作。',
+              editAccount: '编辑账号',
+              addAccountTitle: '添加账号',
+              healthyCheck: '健康检查',
+              dashboardTitle: 'AIProxy 管理面板',
+              saving: '保存中...',
+              notSet: '未设置',
+              yes: '是',
+              no: '否',
+              checking: '检查中...',
+              disabled: '已禁用',
+              close: '关闭',
+              apiBase: 'API地址',
+              modelsCount: '模型数量',
+              noModelsConfig: '未配置模型',
+              enabledLabel: '启用',
+              weightLabel: '权重',
+              priorityLabel: '优先级',
+              autoGenID: '留空自动生成ID',
+              enterApiKey: '输入API密钥',
+              accountsCount: '个账号',
+              name: '名称',
+              adminKeyLabel: '管理密钥:',
+              p50: 'P50',
+              p95: 'P95',
+              p99: 'P99',
+              unknown: '未知',
+              failedFetchAccounts: '获取账号失败: ',
+              failedFetchProviders: '获取服务商失败: ',
+              failedFetchStats: '获取统计失败: ',
+              failedSaveAccount: '保存账号失败: ',
+              failedDeleteAccount: '删除账号失败: ',
+              failedResetLimits: '重置限制失败: ',
+              failedReloadConfig: '重载配置失败: '
+            },
+            en: {
+              dashboard: 'Dashboard',
+              accounts: 'Accounts',
+              providers: 'Providers',
+              stats: 'Stats',
+              settings: 'Settings',
+              totalRequests: 'Total Requests',
+              totalTokens: 'Total Tokens',
+              totalErrors: 'Total Errors',
+              avgLatency: 'TTFT',
+              systemHealth: 'System Health',
+              accountsOverview: 'Accounts Overview',
+              providersOverview: 'Providers Overview',
+              totalAccounts: 'Total Accounts',
+              enabled: 'Enabled',
+              available: 'Available',
+              totalProviders: 'Total Providers',
+              totalModels: 'Total Models',
+              addAccount: 'Add Account',
+              refresh: 'Refresh',
+              id: 'ID',
+              provider: 'Provider',
+              status: 'Status',
+              weight: 'Weight',
+              priority: 'Priority',
+              limits: 'Limits',
+              lastUsed: 'Last Used',
+              actions: 'Actions',
+              edit: 'Edit',
+              reset: 'Reset',
+              delete: 'Delete',
+              noAccounts: 'No accounts found',
+              loading: 'Loading...',
+              models: 'models',
+              default: 'Default',
+              viewDetails: 'View Details',
+              noProviders: 'No providers found',
+              requestsByProvider: 'Requests by Provider',
+              tokensByProvider: 'Tokens by Provider',
+              latencyMetrics: 'Time to First Token (TTFT)',
+              average: 'Average',
+              errorRate: 'Error Rate',
+              errorsOutOf: 'errors out of',
+              requests: 'requests',
+              topModels: 'Top Models by Requests',
+              noData: 'No data available',
+              configuration: 'Configuration',
+              reloadConfig: 'Reload Configuration',
+              reloadDesc: 'Reload the server configuration from disk',
+              reload: 'Reload',
+              healthCheck: 'Health Check',
+              lastChecked: 'Last checked',
+              serverStatus: 'Server Status',
+              adminAPI: 'Admin API',
+              publicAPI: 'Public API',
+              healthStatus: 'Health Status',
+              adminKey: 'Admin Key',
+              currentKey: 'Current Key',
+              storedInBrowser: 'Stored in Browser',
+              enterAdminKey: 'Enter admin key',
+              healthy: 'healthy',
+              unhealthy: 'unhealthy',
+              cancel: 'Cancel',
+              confirm: 'Confirm',
+              save: 'Save',
+              accountCreated: 'Account created successfully',
+              accountUpdated: 'Account updated successfully',
+              accountDeleted: 'Account deleted successfully',
+              limitsReset: 'Limits reset successfully',
+              configReloaded: 'Configuration reloaded successfully',
+              selectProvider: 'Select Provider',
+              accountID: 'Account ID',
+              apiKey: 'API Key',
+              healthy1: 'Healthy',
+              never: 'Never',
+              deleteAccount: 'Delete Account',
+              deleteAccountMsg: 'Are you sure you want to delete this account? This action cannot be undone.',
+              resetLimits: 'Reset Limits',
+              resetLimitsMsg: 'Are you sure you want to reset all rate limits for this account?',
+              reloadConfigTitle: 'Reload Configuration',
+              reloadConfigMsg: 'Are you sure you want to reload the server configuration? This may affect running operations.',
+              editAccount: 'Edit Account',
+              addAccountTitle: 'Add Account',
+              healthyCheck: 'Healthy',
+              dashboardTitle: 'AIProxy Dashboard',
+              saving: 'Saving...',
+              notSet: 'Not set',
+              yes: 'Yes',
+              no: 'No',
+              checking: 'Checking...',
+              disabled: 'Disabled',
+              close: 'Close',
+              apiBase: 'API Base',
+              modelsCount: 'Models Count',
+              noModelsConfig: 'No models configured',
+              enabledLabel: 'Enabled',
+              weightLabel: 'Weight',
+              priorityLabel: 'Priority',
+              autoGenID: 'Leave empty for auto-generated ID',
+              enterApiKey: 'Enter API key',
+              accountsCount: 'accounts',
+              name: 'Name',
+              adminKeyLabel: 'Admin Key:',
+              p50: 'P50',
+              p95: 'P95',
+              p99: 'P99',
+              unknown: 'Unknown',
+              failedFetchAccounts: 'Failed to fetch accounts: ',
+              failedFetchProviders: 'Failed to fetch providers: ',
+              failedFetchStats: 'Failed to fetch stats: ',
+              failedSaveAccount: 'Failed to save account: ',
+              failedDeleteAccount: 'Failed to delete account: ',
+              failedResetLimits: 'Failed to reset limits: ',
+              failedReloadConfig: 'Failed to reload config: '
+            }
+          },
+          confirmModal: {
+            show: false,
+            title: '',
+            message: '',
+            onConfirm: () => {},
+            onCancel: () => {}
+          },
+          accountModal: {
+            show: false,
+            isEdit: false,
+            form: {
+              id: '',
+              provider_id: '',
+              api_key: '',
+              weight: 1,
+              priority: 1,
+              enabled: true
+            }
+          },
+          providerModal: {
+            show: false,
+            provider: null
+          },
+          navItemsIcons: {
+            dashboard: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/></svg>',
+            accounts: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+            providers: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>',
+            stats: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>',
+            settings: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>'
+          }
+        }
+      },
+      computed: {
+        navItems() {
+          return [
+            { id: 'dashboard', label: this.t('dashboard'), icon: this.navItemsIcons.dashboard },
+            { id: 'accounts', label: this.t('accounts'), icon: this.navItemsIcons.accounts },
+            { id: 'providers', label: this.t('providers'), icon: this.navItemsIcons.providers },
+            { id: 'stats', label: this.t('stats'), icon: this.navItemsIcons.stats },
+            { id: 'settings', label: this.t('settings'), icon: this.navItemsIcons.settings }
+          ]
+        },
+        currentViewTitle() {
+          const item = this.navItems.find(i => i.id === this.currentView)
+          return item ? item.label : this.t('dashboard')
+        },
+        errorRate() {
+          if (this.stats.total_requests === 0) return 0
+          return (this.stats.total_errors / this.stats.total_requests) * 100
+        },
+        topModels() {
+          const models = this.stats.by_model || {}
+          return Object.entries(models)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .reduce((acc, [k, v]) => { acc[k] = v; return acc }, {})
+        }
+      },
+      mounted() {
+        this.loadAdminKey()
+        this.fetchHealth()
+        if (this.adminKey) {
+          this.fetchAll()
+        }
+      },
+      watch: {
+        currentView(newView) {
+          if (newView === 'stats') {
+            this.$nextTick(() => {
+              this.initCharts()
+            })
+          }
+        },
+        stats: {
+          handler() {
+            if (this.currentView === 'stats') {
+              this.$nextTick(() => {
+                this.updateCharts()
+              })
+            }
+          },
+          deep: true
+        }
+      },
+      methods: {
+        // i18n methods
+        t(key) {
+          return this.translations[this.lang][key] || key
+        },
+        toggleLang() {
+          this.lang = this.lang === 'zh' ? 'en' : 'zh'
+          localStorage.setItem('aiproxy_lang', this.lang)
+        },
+
+        // API helpers
+        getHeaders() {
+          return {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + this.adminKey
+          }
+        },
+        async apiCall(endpoint, options = {}) {
+          const url = `${API_BASE}${endpoint}`
+          const res = await fetch(url, {
+            ...options,
+            headers: {
+              ...this.getHeaders(),
+              ...options.headers
+            }
+          })
+          if (!res.ok) {
+            const error = await res.json().catch(() => ({ error: 'Request failed' }))
+            throw new Error(error.error || `HTTP ${res.status}`)
+          }
+          return res.json()
+        },
+
+        // Data fetching
+        async fetchAll() {
+          this.loading = true
+          try {
+            await Promise.all([
+              this.fetchAccounts(),
+              this.fetchProviders(),
+              this.fetchStats(),
+              this.fetchHealth()
+            ])
+          } finally {
+            this.loading = false
+          }
+        },
+        async fetchAccounts() {
+          try {
+            const data = await this.apiCall('/admin/accounts')
+            this.accounts = (data.accounts || data || []).map(a => ({
+              ...a,
+              enabled: a.is_enabled,
+              provider: a.provider_id,
+              available: a.available !== undefined ? a.available : true
+            }))
+          } catch (e) {
+            this.showToast(this.t('failedFetchAccounts') + e.message, 'error')
+          }
+        },
+        async fetchProviders() {
+          try {
+            const data = await this.apiCall('/admin/providers')
+            this.providers = (data.providers || data || []).map(p => ({
+              ...p,
+              id: p.name || p.id,
+              enabled: p.enabled !== undefined ? p.enabled : true,
+              is_default: p.is_default || false
+            }))
+          } catch (e) {
+            this.showToast(this.t('failedFetchProviders') + e.message, 'error')
+          }
+        },
+        async fetchStats() {
+          try {
+            const data = await this.apiCall('/admin/stats')
+            this.stats = {
+              total_requests: data.total_requests || 0,
+              total_tokens: data.total_tokens || 0,
+              total_errors: data.total_errors || 0,
+              by_provider: data.requests_by_provider || {},
+              by_model: data.requests_by_model || {},
+              tokens_by_provider: data.tokens_by_provider || {},
+              latency: {
+                avg_ms: data.avg_ttft_ms || data.avg_latency_ms || 0,
+                p50_ms: data.ttft_percentiles?.p50 || data.latency_percentiles?.p50 || 0,
+                p95_ms: data.ttft_percentiles?.p95 || data.latency_percentiles?.p95 || 0,
+                p99_ms: data.ttft_percentiles?.p99 || data.latency_percentiles?.p99 || 0
+              }
+            }
+          } catch (e) {
+            this.showToast(this.t('failedFetchStats') + e.message, 'error')
+          }
+        },
+        async fetchHealth() {
+          try {
+            const health = await this.apiCall('/admin/health')
+            this.health = health
+            this.healthStatus = health.status
+          } catch (e) {
+            this.healthStatus = 'unhealthy'
+            this.health = { status: 'unhealthy', timestamp: new Date().toISOString(), checks: {} }
+          }
+        },
+
+        // Account CRUD
+        openAddAccountModal() {
+          this.accountModal = {
+            show: true,
+            isEdit: false,
+            form: {
+              id: '',
+              provider_id: this.providers[0]?.id || '',
+              api_key: '',
+              weight: 1,
+              priority: 1,
+              enabled: true
+            }
+          }
+        },
+        openEditAccountModal(account) {
+          this.accountModal = {
+            show: true,
+            isEdit: true,
+            form: {
+              id: account.id,
+              provider_id: account.provider,
+              api_key: '',
+              weight: account.weight,
+              priority: account.priority,
+              enabled: account.enabled
+            }
+          }
+        },
+        async saveAccount() {
+          this.loading = true
+          try {
+            if (this.accountModal.isEdit) {
+              await this.apiCall(`/admin/accounts/${this.accountModal.form.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                  weight: this.accountModal.form.weight,
+                  priority: this.accountModal.form.priority,
+                  enabled: this.accountModal.form.enabled
+                })
+              })
+              this.showToast(this.t('accountUpdated'), 'success')
+            } else {
+              await this.apiCall('/admin/accounts', {
+                method: 'POST',
+                body: JSON.stringify(this.accountModal.form)
+              })
+              this.showToast(this.t('accountCreated'), 'success')
+            }
+            this.accountModal.show = false
+            await this.fetchAccounts()
+          } catch (e) {
+            this.showToast(this.t('failedSaveAccount') + e.message, 'error')
+          } finally {
+            this.loading = false
+          }
+        },
+        deleteAccount(id) {
+          this.showConfirm(
+            this.t('deleteAccount'),
+            this.t('deleteAccountMsg'),
+            async () => {
+              try {
+                await this.apiCall(`/admin/accounts/${id}`, { method: 'DELETE' })
+                this.showToast(this.t('accountDeleted'), 'success')
+                await this.fetchAccounts()
+              } catch (e) {
+                this.showToast(this.t('failedDeleteAccount') + e.message, 'error')
+              }
+            }
+          )
+        },
+        async resetAccountLimits(id) {
+          this.showConfirm(
+            this.t('resetLimits'),
+            this.t('resetLimitsMsg'),
+            async () => {
+              try {
+                await this.apiCall(`/admin/accounts/${id}/reset`, { method: 'POST' })
+                this.showToast(this.t('limitsReset'), 'success')
+                await this.fetchAccounts()
+              } catch (e) {
+                this.showToast(this.t('failedResetLimits') + e.message, 'error')
+              }
+            }
+          )
+        },
+
+        // Provider modal
+        openProviderModal(provider) {
+          this.providerModal = { show: true, provider }
+        },
+
+        // Settings
+        async reloadConfig() {
+          this.showConfirm(
+            this.t('reloadConfigTitle'),
+            this.t('reloadConfigMsg'),
+            async () => {
+              this.loading = true
+              try {
+                await this.apiCall('/admin/reload', { method: 'POST' })
+                this.showToast(this.t('configReloaded'), 'success')
+                await this.fetchAll()
+              } catch (e) {
+                this.showToast(this.t('failedReloadConfig') + e.message, 'error')
+              } finally {
+                this.loading = false
+              }
+            }
+          )
+        },
+
+        // Admin key
+        loadAdminKey() {
+          const stored = localStorage.getItem('aiproxy_admin_key')
+          if (stored) {
+            this.adminKey = stored
+            this.hasStoredKey = true
+          }
+        },
+        saveAdminKey() {
+          if (this.adminKey) {
+            localStorage.setItem('aiproxy_admin_key', this.adminKey)
+            this.hasStoredKey = true
+            this.fetchAll()
+          } else {
+            localStorage.removeItem('aiproxy_admin_key')
+            this.hasStoredKey = false
+          }
+        },
+
+        // Toast notifications
+        showToast(message, type = 'info') {
+          const id = ++this.toastId
+          this.toasts.push({ id, message, type })
+          setTimeout(() => this.removeToast(id), 5000)
+        },
+        removeToast(id) {
+          this.toasts = this.toasts.filter(t => t.id !== id)
+        },
+
+        // Confirmation modal
+        showConfirm(title, message, onConfirm) {
+          this.confirmModal = {
+            show: true,
+            title,
+            message,
+            onConfirm: () => {
+              this.confirmModal.show = false
+              onConfirm()
+            },
+            onCancel: () => {
+              this.confirmModal.show = false
+            }
+          }
+        },
+
+        // Charts
+        initCharts() {
+          if (this.charts.requests) {
+            this.charts.requests.destroy()
+          }
+          if (this.charts.tokens) {
+            this.charts.tokens.destroy()
+          }
+
+          const requestsCtx = document.getElementById('requestsChart')
+          const tokensCtx = document.getElementById('tokensChart')
+
+          if (!requestsCtx || !tokensCtx) return
+
+          const byProvider = this.stats.by_provider || {}
+          const tokensByProvider = this.stats.tokens_by_provider || {}
+
+          const colors = [
+            '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6',
+            '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'
+          ]
+
+          this.charts.requests = new Chart(requestsCtx, {
+            type: 'bar',
+            data: {
+              labels: Object.keys(byProvider),
+              datasets: [{
+                label: 'Requests',
+                data: Object.values(byProvider),
+                backgroundColor: colors.slice(0, Object.keys(byProvider).length)
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false }
+              },
+              scales: {
+                y: { beginAtZero: true, grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
+                x: { grid: { display: false }, ticks: { color: '#9ca3af' } }
+              }
+            }
+          })
+
+          this.charts.tokens = new Chart(tokensCtx, {
+            type: 'bar',
+            data: {
+              labels: Object.keys(tokensByProvider),
+              datasets: [{
+                label: 'Tokens',
+                data: Object.values(tokensByProvider),
+                backgroundColor: colors.slice(0, Object.keys(tokensByProvider).length)
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false }
+              },
+              scales: {
+                y: { beginAtZero: true, grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
+                x: { grid: { display: false }, ticks: { color: '#9ca3af' } }
+              }
+            }
+          })
+        },
+        updateCharts() {
+          if (!this.charts.requests || !this.charts.tokens) {
+            this.initCharts()
+            return
+          }
+
+          const byProvider = this.stats.by_provider || {}
+          const tokensByProvider = this.stats.tokens_by_provider || {}
+
+          this.charts.requests.data.labels = Object.keys(byProvider)
+          this.charts.requests.data.datasets[0].data = Object.values(byProvider)
+          this.charts.requests.update()
+
+          this.charts.tokens.data.labels = Object.keys(tokensByProvider)
+          this.charts.tokens.data.datasets[0].data = Object.values(tokensByProvider)
+          this.charts.tokens.update()
+        },
+
+        // Formatting helpers
+        formatNumber(num) {
+          if (num === null || num === undefined) return '0'
+          if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+          if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+          return num.toString()
+        },
+        formatDate(dateStr) {
+          if (!dateStr) return ''
+          const date = new Date(dateStr)
+          return date.toLocaleString()
+        }
+      }
+    }).mount('#app')
+  </script>
+</body>
+</html>

@@ -13,6 +13,7 @@ type RequestMetrics struct {
 	Errors  int64
 	Tokens  int64
 	Latency []time.Duration
+	TTFT    []time.Duration
 }
 
 type ErrorMetric struct {
@@ -36,6 +37,8 @@ type Snapshot struct {
 	TotalErrors  int64
 	TotalLatency time.Duration
 	LatencyCount int64
+	TotalTTFT    time.Duration
+	TTFTCount    int64
 }
 
 type Collector struct {
@@ -49,6 +52,8 @@ type Collector struct {
 	totalErrors  int64
 	totalLatency time.Duration
 	latencyCount int64
+	totalTTFT    time.Duration
+	ttftCount    int64
 }
 
 func NewCollector() *Collector {
@@ -69,6 +74,7 @@ func (c *Collector) RecordRequest(provider, model string, status int, latency ti
 	if !ok {
 		metrics = &RequestMetrics{
 			Latency: make([]time.Duration, 0, 1000),
+			TTFT:    make([]time.Duration, 0, 1000),
 		}
 		c.requests[key] = metrics
 	}
@@ -85,6 +91,26 @@ func (c *Collector) RecordRequest(provider, model string, status int, latency ti
 		metrics.Errors++
 		c.totalErrors++
 	}
+}
+
+func (c *Collector) RecordTTFT(provider, model string, ttft time.Duration) {
+	key := provider + ":" + model
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	metrics, ok := c.requests[key]
+	if !ok {
+		metrics = &RequestMetrics{
+			Latency: make([]time.Duration, 0, 1000),
+			TTFT:    make([]time.Duration, 0, 1000),
+		}
+		c.requests[key] = metrics
+	}
+
+	metrics.TTFT = append(metrics.TTFT, ttft)
+	c.totalTTFT += ttft
+	c.ttftCount++
 }
 
 func (c *Collector) RecordError(provider, model string, errorType string) {
@@ -118,17 +144,17 @@ func (c *Collector) GetSnapshot() *Snapshot {
 		TotalErrors:  c.totalErrors,
 		TotalLatency: c.totalLatency,
 		LatencyCount: c.latencyCount,
+		TotalTTFT:    c.totalTTFT,
+		TTFTCount:    c.ttftCount,
 	}
 
 	for key, metrics := range c.requests {
 		copied := *metrics
 		copied.Latency = make([]time.Duration, len(metrics.Latency))
 		copy(copied.Latency, metrics.Latency)
+		copied.TTFT = make([]time.Duration, len(metrics.TTFT))
+		copy(copied.TTFT, metrics.TTFT)
 		snapshot.Requests[key] = &copied
-
-		// FIX: Clear the latency slice after snapshot to prevent memory leak (OOM)
-		// We retain the slice capacity for GC efficiency
-		metrics.Latency = metrics.Latency[:0]
 	}
 
 	for key, count := range c.errors {
@@ -175,6 +201,28 @@ func (s *Snapshot) LatencyPercentiles() (p50, p95, p99 time.Duration) {
 	p50 = allLatencies[n*50/100]
 	p95 = allLatencies[n*95/100]
 	p99 = allLatencies[n*99/100]
+
+	return
+}
+
+func (s *Snapshot) TTFTPercentiles() (p50, p95, p99 time.Duration) {
+	var allTTFT []time.Duration
+	for _, m := range s.Requests {
+		allTTFT = append(allTTFT, m.TTFT...)
+	}
+
+	if len(allTTFT) == 0 {
+		return 0, 0, 0
+	}
+
+	sort.Slice(allTTFT, func(i, j int) bool {
+		return allTTFT[i] < allTTFT[j]
+	})
+
+	n := len(allTTFT)
+	p50 = allTTFT[n*50/100]
+	p95 = allTTFT[n*95/100]
+	p99 = allTTFT[n*99/100]
 
 	return
 }

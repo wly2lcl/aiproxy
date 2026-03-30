@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -35,6 +36,9 @@ var (
 	Version   = "dev"
 	BuildTime = "unknown"
 )
+
+//go:embed web
+var webFS embed.FS
 
 type Server struct {
 	config              *config.Config
@@ -560,6 +564,9 @@ func (s *Server) setupAdminAPI() (*http.Server, error) {
 		GenerateIfMissing: true,
 	}))
 
+	engine.GET("/", s.handleDashboard)
+	engine.GET("/dashboard", s.handleDashboard)
+
 	adminAuth := &middleware.AuthConfig{
 		Enabled:    len(s.config.Admin.APIKeys) > 0,
 		APIKeys:    make(map[string]bool),
@@ -569,18 +576,19 @@ func (s *Server) setupAdminAPI() (*http.Server, error) {
 	for _, key := range s.config.Admin.APIKeys {
 		adminAuth.APIKeys[key] = true
 	}
-	engine.Use(middleware.Auth(adminAuth))
 
-	engine.GET("/admin/accounts", s.handleAdminListAccounts)
-	engine.GET("/admin/accounts/:id", s.handleAdminGetAccount)
-	engine.POST("/admin/accounts", s.handleAdminCreateAccount)
-	engine.PUT("/admin/accounts/:id", s.handleAdminUpdateAccount)
-	engine.DELETE("/admin/accounts/:id", s.handleAdminDeleteAccount)
-	engine.POST("/admin/accounts/:id/reset", s.handleAdminResetAccount)
-	engine.GET("/admin/stats", s.handleAdminStats)
-	engine.GET("/admin/providers", s.handleAdminListProviders)
-	engine.POST("/admin/reload", s.handleAdminReload)
-	engine.GET("/admin/health", s.handleHealth)
+	adminGroup := engine.Group("")
+	adminGroup.Use(middleware.Auth(adminAuth))
+	adminGroup.GET("/admin/accounts", s.handleAdminListAccounts)
+	adminGroup.GET("/admin/accounts/:id", s.handleAdminGetAccount)
+	adminGroup.POST("/admin/accounts", s.handleAdminCreateAccount)
+	adminGroup.PUT("/admin/accounts/:id", s.handleAdminUpdateAccount)
+	adminGroup.DELETE("/admin/accounts/:id", s.handleAdminDeleteAccount)
+	adminGroup.POST("/admin/accounts/:id/reset", s.handleAdminResetAccount)
+	adminGroup.GET("/admin/stats", s.handleAdminStats)
+	adminGroup.GET("/admin/providers", s.handleAdminListProviders)
+	adminGroup.POST("/admin/reload", s.handleAdminReload)
+	adminGroup.GET("/admin/health", s.handleHealth)
 
 	server := &http.Server{
 		Addr:    s.config.Admin.Listen,
@@ -839,10 +847,11 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 	}
 	streamHandler := proxy.NewStreamHandlerWithConfig(s.proxy, charsPerToken, streamingMode)
 
-	if err := streamHandler.ServeStream(c.Writer, c.Request, resp); err != nil {
+	if err := streamHandler.ServeStream(c.Writer, c.Request, resp, startTime); err != nil {
 		slog.Error("stream error", "error", err, "request_id", c.GetString("request_id"))
 	}
 
+	ttft := streamHandler.GetTTFT()
 	latency := time.Since(startTime)
 	promptTokens, completionTokens, found := streamHandler.GetTokenExtractor().ExtractFromStream(nil)
 
@@ -855,11 +864,15 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 		s.statsCollector.RecordRequest(providerName, req.Model, http.StatusOK, latency, 0)
 	}
 
-	slog.Info("stream completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "latency", latency)
+	if ttft > 0 {
+		s.statsCollector.RecordTTFT(providerName, req.Model, ttft)
+	}
+
+	slog.Info("stream completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency)
 }
 
 func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, account *domain.Account, providerName string, req *openai.ChatCompletionRequest, startTime time.Time) {
-	defer resp.Body.Close() // 确保 HTTP 连接被释放回连接池
+	defer resp.Body.Close()
 
 	for key, values := range resp.Header {
 		for _, value := range values {
@@ -896,6 +909,7 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 	c.Status(resp.StatusCode)
 	c.Writer.Write(bodyBytes)
 
+	ttft := time.Since(startTime)
 	latency := time.Since(startTime)
 
 	var chatResp openai.ChatCompletionResponse
@@ -908,7 +922,9 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 		s.statsCollector.RecordRequest(providerName, req.Model, resp.StatusCode, latency, 0)
 	}
 
-	slog.Info("request completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "latency", latency, "status", resp.StatusCode)
+	s.statsCollector.RecordTTFT(providerName, req.Model, ttft)
+
+	slog.Info("request completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency, "status", resp.StatusCode)
 }
 
 func (s *Server) forwardUpstreamError(c *gin.Context, resp *http.Response) {
@@ -948,6 +964,11 @@ func (s *Server) recordAccountSuccess(accountID string) {
 	}
 	if cb, ok := s.circuitBreakers[accountID]; ok {
 		cb.RecordSuccess()
+	}
+	if s.storage != nil {
+		if err := s.storage.UpdateAccountLastUsed(context.Background(), accountID); err != nil {
+			slog.Warn("failed to update account last used", "account_id", accountID, "error", err)
+		}
 	}
 }
 
@@ -1027,18 +1048,33 @@ func (s *Server) handleAdminListAccounts(c *gin.Context) {
 	providerName := c.Query("provider")
 	result := make([]map[string]interface{}, 0)
 
+	lastUsedMap := make(map[string]string)
+	if s.storage != nil {
+		if lastUsed, err := s.storage.GetAllAccountLastUsed(c.Request.Context()); err == nil {
+			for id, t := range lastUsed {
+				lastUsedMap[id] = t.UTC().Format(time.RFC3339)
+			}
+		}
+	}
+
 	for name, p := range s.accountPools {
 		if providerName != "" && name != providerName {
 			continue
 		}
 		for _, acc := range p.List() {
-			result = append(result, map[string]interface{}{
+			state := p.GetState(acc.ID)
+			accountData := map[string]interface{}{
 				"id":          acc.ID,
 				"provider_id": acc.ProviderID,
 				"weight":      acc.Weight,
 				"priority":    acc.Priority,
 				"is_enabled":  acc.IsEnabled,
-			})
+				"available":   acc.IsEnabled && state.ConsecutiveFailures < domain.CircuitBreakerThreshold,
+			}
+			if lastUsed, ok := lastUsedMap[acc.ID]; ok {
+				accountData["last_used_at"] = lastUsed
+			}
+			result = append(result, accountData)
 		}
 	}
 
@@ -1240,6 +1276,15 @@ func (s *Server) handleAdminReload(c *gin.Context) {
 
 	slog.Info("configuration reloaded successfully")
 	c.JSON(http.StatusOK, gin.H{"message": "configuration reloaded"})
+}
+
+func (s *Server) handleDashboard(c *gin.Context) {
+	html, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load dashboard"})
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", html)
 }
 
 func init() {

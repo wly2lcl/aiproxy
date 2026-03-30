@@ -87,3 +87,5 @@ dist/
 
 # Test artifacts
 test_output/
+# Binary
+server

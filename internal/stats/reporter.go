@@ -95,13 +95,27 @@ func (r *Reporter) Prometheus() string {
 func (r *Reporter) JSON() string {
 	snapshot := r.collector.GetSnapshot()
 	p50, p95, p99 := snapshot.LatencyPercentiles()
+	ttftP50, ttftP95, ttftP99 := snapshot.TTFTPercentiles()
+
+	var avgLatencyMs float64
+	if snapshot.LatencyCount > 0 {
+		avgLatencyMs = float64(snapshot.TotalLatency.Milliseconds()) / float64(snapshot.LatencyCount)
+	}
+
+	var avgTTFTMs float64
+	if snapshot.TTFTCount > 0 {
+		avgTTFTMs = float64(snapshot.TotalTTFT.Milliseconds()) / float64(snapshot.TTFTCount)
+	}
 
 	data := struct {
 		Timestamp          string             `json:"timestamp"`
 		TotalRequests      int64              `json:"total_requests"`
 		TotalErrors        int64              `json:"total_errors"`
 		TotalTokens        int64              `json:"total_tokens"`
-		LatencyPercentile  LatencyPercentiles `json:"latency_percentiles"`
+		AvgLatencyMs       float64            `json:"avg_latency_ms"`
+		LatencyPercentiles LatencyPercentiles `json:"latency_percentiles"`
+		AvgTTFTMs          float64            `json:"avg_ttft_ms"`
+		TTFTPercentiles    LatencyPercentiles `json:"ttft_percentiles"`
 		RequestsByProvider map[string]int64   `json:"requests_by_provider"`
 		RequestsByModel    map[string]int64   `json:"requests_by_model"`
 		TokensByProvider   map[string]int64   `json:"tokens_by_provider"`
@@ -119,7 +133,10 @@ func (r *Reporter) JSON() string {
 		}(),
 		TotalErrors:        snapshot.TotalErrors,
 		TotalTokens:        snapshot.TotalTokens,
-		LatencyPercentile:  LatencyPercentiles{P50: p50, P95: p95, P99: p99},
+		AvgLatencyMs:       avgLatencyMs,
+		LatencyPercentiles: LatencyPercentiles{P50Ms: toMs(p50), P95Ms: toMs(p95), P99Ms: toMs(p99)},
+		AvgTTFTMs:          avgTTFTMs,
+		TTFTPercentiles:    LatencyPercentiles{P50Ms: toMs(ttftP50), P95Ms: toMs(ttftP95), P99Ms: toMs(ttftP99)},
 		RequestsByProvider: snapshot.RequestsByProvider(),
 		RequestsByModel:    snapshot.RequestsByModel(),
 		TokensByProvider:   snapshot.TokensByProvider(),
@@ -136,7 +153,11 @@ func (r *Reporter) JSON() string {
 }
 
 type LatencyPercentiles struct {
-	P50 time.Duration `json:"p50"`
-	P95 time.Duration `json:"p95"`
-	P99 time.Duration `json:"p99"`
+	P50Ms float64 `json:"p50"`
+	P95Ms float64 `json:"p95"`
+	P99Ms float64 `json:"p99"`
+}
+
+func toMs(d time.Duration) float64 {
+	return float64(d.Microseconds()) / 1000.0
 }
