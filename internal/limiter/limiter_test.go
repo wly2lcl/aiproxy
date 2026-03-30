@@ -172,6 +172,38 @@ func (m *mockStorage) GetLatencyData(ctx context.Context, since time.Time) ([]*s
 	return nil, nil
 }
 
+func (m *mockStorage) GetLogByID(ctx context.Context, requestID string) (*storage.RequestLog, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) GetAccountModelStats(ctx context.Context, accountID string, since time.Time) (map[string]int64, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) CreateAPIKey(ctx context.Context, keyHash, name string, expiresAt *time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockStorage) GetAPIKeyByHash(ctx context.Context, keyHash string) (*storage.APIKey, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) ListAPIKeys(ctx context.Context) ([]*storage.APIKey, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) UpdateAPIKeyUsage(ctx context.Context, keyHash string) error {
+	return nil
+}
+
+func (m *mockStorage) DeleteAPIKey(ctx context.Context, id int64) error {
+	return nil
+}
+
+func (m *mockStorage) ToggleAPIKey(ctx context.Context, id int64, enabled bool) error {
+	return nil
+}
+
 func TestRPM_Allow_UnderLimit(t *testing.T) {
 	store := newMockStorage()
 	limiter := NewRPM(store, 10)

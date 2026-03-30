@@ -27,11 +27,15 @@ const app = Vue.createApp({
       timeSeriesRange: '24',
       accountStats: [],
       modelStats: [],
+      apiKeys: [],
+      accountModelStats: {},
       confirmModal: { show: false, title: '', message: '', onConfirm: () => {}, onCancel: () => {} },
       accountModal: { show: false, isEdit: false, form: { id: '', provider_id: '', api_key: '', weight: 1, priority: 1, enabled: true } },
       accountLimitsModal: { show: false, account: null, limits: [] },
       providerModal: { show: false, provider: null },
-      logDetailModal: { show: false, log: null }
+      logDetailModal: { show: false, log: null },
+      accountModelsModal: { show: false, accountId: '', models: {} },
+      apiKeyModal: { show: false, newKey: null }
     }
   },
   computed: {
@@ -43,6 +47,7 @@ const app = Vue.createApp({
         { id: 'providers', label: this.t('providers'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>' },
         { id: 'logs', label: this.t('logs'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>' },
         { id: 'stats', label: this.t('stats'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>' },
+        { id: 'apikeys', label: this.t('apiKeys'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>' },
         { id: 'settings', label: this.t('settings'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' }
       ]
     },
@@ -94,7 +99,7 @@ const app = Vue.createApp({
       if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Request failed' })); throw new Error(e.error || `HTTP ${res.status}`) }
       return res.json()
     },
-    async fetchAll() { await Promise.all([this.fetchAccounts(), this.fetchProviders(), this.fetchStats(), this.fetchLogs(), this.fetchVersion(), this.fetchModelMapping(), this.fetchTimeSeries(), this.fetchAccountStats(), this.fetchModelStats()]) },
+    async fetchAll() { await Promise.all([this.fetchAccounts(), this.fetchProviders(), this.fetchStats(), this.fetchLogs(), this.fetchVersion(), this.fetchModelMapping(), this.fetchTimeSeries(), this.fetchAccountStats(), this.fetchModelStats(), this.fetchAPIKeys()]) },
     async fetchAccounts() {
       try {
         const data = await this.apiCall('/admin/accounts')
@@ -254,8 +259,56 @@ const app = Vue.createApp({
       })
     },
     formatNumber(n) { if (!n) return '0'; if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'; if (n >= 1000) return (n / 1000).toFixed(1) + 'K'; return n.toString() },
-    formatDate(d) { return d ? new Date(d).toLocaleString() : '' },
+    formatDate(d) { return d && d !== '' ? new Date(d).toLocaleString() : '' },
     formatDuration(ms) { if (!ms) return '-'; if (ms < 1000) return ms.toFixed(0) + 'ms'; return (ms / 1000).toFixed(2) + 's' },
-    formatPercent(v) { return v ? v.toFixed(1) + '%' : '0%' }
+    formatPercent(v) { return v ? v.toFixed(1) + '%' : '0%' },
+    async fetchAPIKeys() {
+      try { const d = await this.apiCall('/admin/api-keys'); this.apiKeys = d.api_keys || [] }
+      catch (e) {}
+    },
+    async fetchAccountModelStats(accountId) {
+      try { const d = await this.apiCall(`/admin/accounts/${accountId}/models?hours=24`); return d.model_stats || {} }
+      catch (e) { return {} }
+    },
+    async openLogDetailModal(log) {
+      try {
+        const d = await this.apiCall(`/admin/logs/${log.RequestID}`)
+        this.logDetailModal = { show: true, log: d.log }
+      } catch (e) { this.showToast(e.message, 'error') }
+    },
+    async openAccountModelsModal(accountId) {
+      const models = await this.fetchAccountModelStats(accountId)
+      this.accountModelsModal = { show: true, accountId, models }
+    },
+    async createAPIKey() {
+      const name = prompt(this.t('keyName'))
+      if (!name) return
+      this.loading = true
+      try {
+        const d = await this.apiCall('/admin/api-keys', { method: 'POST', body: JSON.stringify({ name }) })
+        this.apiKeyModal = { show: true, newKey: d }
+        this.showToast(this.t('apiKeyCreated'), 'success')
+        await this.fetchAPIKeys()
+      } catch (e) { this.showToast(e.message, 'error') } finally { this.loading = false }
+    },
+    async deleteAPIKey(id) {
+      this.showConfirm(this.t('deleteAPIKey'), this.t('deleteAPIKeyMsg'), async () => {
+        try {
+          await this.apiCall(`/admin/api-keys/${id}`, { method: 'DELETE' })
+          this.showToast(this.t('apiKeyDeleted'), 'success')
+          await this.fetchAPIKeys()
+        } catch (e) { this.showToast(e.message, 'error') }
+      })
+    },
+    async toggleAPIKey(id, enabled) {
+      try {
+        await this.apiCall(`/admin/api-keys/${id}/toggle`, { method: 'PUT', body: JSON.stringify({ enabled }) })
+        await this.fetchAPIKeys()
+      } catch (e) { this.showToast(e.message, 'error') }
+    },
+    copyToClipboard(text) {
+      navigator.clipboard.writeText(text)
+      this.showToast(this.t('copied'), 'success')
+    }
   }
 })

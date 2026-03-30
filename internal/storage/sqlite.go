@@ -564,12 +564,72 @@ func (s *SQLite) GetRecentLogs(ctx context.Context, limit int) ([]*RequestLog, e
 	return logs, nil
 }
 
+func (s *SQLite) GetLogByID(ctx context.Context, requestID string) (*RequestLog, error) {
+	row := s.db.QueryRowContext(ctx, getLogByIDQuery, requestID)
+
+	var log RequestLog
+	var ttftMs, latencyMs sql.NullFloat64
+	var errorType, errorMessage, requestBody, responseBody sql.NullString
+	var isStreaming sql.NullBool
+	var timestamp sql.NullTime
+
+	err := row.Scan(
+		&log.RequestID,
+		&log.AccountID,
+		&log.ProviderID,
+		&log.Model,
+		&log.Status,
+		&log.Tokens,
+		&ttftMs,
+		&latencyMs,
+		&errorType,
+		&errorMessage,
+		&timestamp,
+		&isStreaming,
+		&requestBody,
+		&responseBody,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get log by id: %w", err)
+	}
+
+	if ttftMs.Valid {
+		log.TTFTMs = ttftMs.Float64
+	}
+	if latencyMs.Valid {
+		log.LatencyMs = latencyMs.Float64
+	}
+	if errorType.Valid {
+		log.ErrorType = errorType.String
+	}
+	if errorMessage.Valid {
+		log.ErrorMessage = errorMessage.String
+	}
+	if timestamp.Valid {
+		log.Timestamp = timestamp.Time
+	}
+	if isStreaming.Valid {
+		log.IsStreaming = isStreaming.Bool
+	}
+	if requestBody.Valid {
+		log.RequestBody = requestBody.String
+	}
+	if responseBody.Valid {
+		log.ResponseBody = responseBody.String
+	}
+
+	return &log, nil
+}
+
 func (s *SQLite) RecordRequestLog(ctx context.Context, log *RequestLog) error {
 	if log == nil {
 		return fmt.Errorf("log cannot be nil")
 	}
 
-	_, err := s.db.ExecContext(ctx, recordRequestLogQuery,
+	_, err := s.db.ExecContext(ctx, recordRequestLogWithBodyQuery,
 		log.RequestID,
 		log.AccountID,
 		log.ProviderID,
@@ -579,7 +639,10 @@ func (s *SQLite) RecordRequestLog(ctx context.Context, log *RequestLog) error {
 		log.TTFTMs,
 		log.LatencyMs,
 		log.ErrorType,
+		log.ErrorMessage,
 		log.IsStreaming,
+		log.RequestBody,
+		log.ResponseBody,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record request log: %w", err)
@@ -631,8 +694,8 @@ func (s *SQLite) GetAllAccountStats(ctx context.Context, since time.Time) ([]*Ac
 	for rows.Next() {
 		var st AccountStats
 		var avgLatency, avgTTFT, successRate sql.NullFloat64
-		var lastUsedStr sql.NullString
-		err := rows.Scan(&st.AccountID, &st.RequestCount, &st.ErrorCount, &st.TotalTokens, &avgLatency, &avgTTFT, &successRate, &lastUsedStr)
+		var lastUsed sql.NullTime
+		err := rows.Scan(&st.AccountID, &st.RequestCount, &st.ErrorCount, &st.TotalTokens, &avgLatency, &avgTTFT, &successRate, &lastUsed)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan account stats: %w", err)
 		}
@@ -645,10 +708,8 @@ func (s *SQLite) GetAllAccountStats(ctx context.Context, since time.Time) ([]*Ac
 		if successRate.Valid {
 			st.SuccessRate = successRate.Float64
 		}
-		if lastUsedStr.Valid && lastUsedStr.String != "" {
-			if t, err := time.Parse("2006-01-02 15:04:05", lastUsedStr.String); err == nil {
-				st.LastUsedAt = &t
-			}
+		if lastUsed.Valid {
+			st.LastUsedAt = &lastUsed.Time
 		}
 		stats = append(stats, &st)
 	}
@@ -711,4 +772,131 @@ func (s *SQLite) GetLatencyData(ctx context.Context, since time.Time) ([]*Latenc
 	}
 
 	return data, nil
+}
+
+func (s *SQLite) GetAccountModelStats(ctx context.Context, accountID string, since time.Time) (map[string]int64, error) {
+	rows, err := s.db.QueryContext(ctx, getAccountModelStatsQuery, accountID, since.UTC().Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account model stats: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]int64)
+	for rows.Next() {
+		var model string
+		var count int64
+		if err := rows.Scan(&model, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan model stats: %w", err)
+		}
+		result[model] = count
+	}
+
+	return result, nil
+}
+
+func (s *SQLite) CreateAPIKey(ctx context.Context, keyHash, name string, expiresAt *time.Time) (int64, error) {
+	var expiresStr interface{}
+	if expiresAt != nil {
+		expiresStr = expiresAt.UTC().Format("2006-01-02 15:04:05")
+	}
+
+	result, err := s.db.ExecContext(ctx, createAPIKeyQuery, keyHash, name, expiresStr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create api key: %w", err)
+	}
+
+	return result.LastInsertId()
+}
+
+func (s *SQLite) GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error) {
+	row := s.db.QueryRowContext(ctx, getAPIKeyByHashQuery, keyHash)
+
+	var key APIKey
+	var lastUsed, expires sql.NullTime
+	err := row.Scan(
+		&key.ID,
+		&key.KeyHash,
+		&key.Name,
+		&key.IsEnabled,
+		&key.CreatedAt,
+		&lastUsed,
+		&key.RequestCount,
+		&expires,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get api key: %w", err)
+	}
+
+	if lastUsed.Valid {
+		key.LastUsedAt = &lastUsed.Time
+	}
+	if expires.Valid {
+		key.ExpiresAt = &expires.Time
+	}
+
+	return &key, nil
+}
+
+func (s *SQLite) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
+	rows, err := s.db.QueryContext(ctx, listAPIKeysQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list api keys: %w", err)
+	}
+	defer rows.Close()
+
+	var keys []*APIKey
+	for rows.Next() {
+		var key APIKey
+		var lastUsed, expires sql.NullTime
+		err := rows.Scan(
+			&key.ID,
+			&key.KeyHash,
+			&key.Name,
+			&key.IsEnabled,
+			&key.CreatedAt,
+			&lastUsed,
+			&key.RequestCount,
+			&expires,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan api key: %w", err)
+		}
+
+		if lastUsed.Valid {
+			key.LastUsedAt = &lastUsed.Time
+		}
+		if expires.Valid {
+			key.ExpiresAt = &expires.Time
+		}
+		keys = append(keys, &key)
+	}
+
+	return keys, nil
+}
+
+func (s *SQLite) UpdateAPIKeyUsage(ctx context.Context, keyHash string) error {
+	_, err := s.db.ExecContext(ctx, updateAPIKeyUsageQuery, keyHash)
+	if err != nil {
+		return fmt.Errorf("failed to update api key usage: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLite) DeleteAPIKey(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, deleteAPIKeyQuery, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete api key: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLite) ToggleAPIKey(ctx context.Context, id int64, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, toggleAPIKeyQuery, enabled, id)
+	if err != nil {
+		return fmt.Errorf("failed to toggle api key: %w", err)
+	}
+	return nil
 }

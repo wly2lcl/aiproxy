@@ -161,4 +161,44 @@ ORDER BY request_count DESC`
 SELECT latency_ms, ttft_ms, status
 FROM request_logs
 WHERE created_at >= ? AND latency_ms > 0`
+
+	recordRequestLogWithBodyQuery = `
+INSERT INTO request_logs (request_id, account_id, provider_id, model, status, tokens, ttft_ms, latency_ms, error_type, error_message, is_streaming, request_body, response_body)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	getLogByIDQuery = `
+SELECT request_id, account_id, provider_id, model, status, tokens, ttft_ms, latency_ms, error_type, error_message, created_at, is_streaming, request_body, response_body
+FROM request_logs
+WHERE request_id = ?`
+
+	getAccountModelStatsQuery = `
+SELECT model, COUNT(*) as count
+FROM request_logs
+WHERE account_id = ? AND created_at >= ?
+GROUP BY model
+ORDER BY count DESC`
+
+	createAPIKeyQuery = `
+INSERT INTO api_keys (key_hash, name, expires_at)
+VALUES (?, ?, ?)`
+
+	getAPIKeyByHashQuery = `
+SELECT id, key_hash, name, is_enabled, created_at, last_used_at, request_count, expires_at
+FROM api_keys
+WHERE key_hash = ?`
+
+	listAPIKeysQuery = `
+SELECT id, key_hash, name, is_enabled, created_at, last_used_at, request_count, expires_at
+FROM api_keys
+ORDER BY created_at DESC`
+
+	updateAPIKeyUsageQuery = `
+UPDATE api_keys SET last_used_at = datetime('now'), request_count = request_count + 1
+WHERE key_hash = ?`
+
+	deleteAPIKeyQuery = `
+DELETE FROM api_keys WHERE id = ?`
+
+	toggleAPIKeyQuery = `
+UPDATE api_keys SET is_enabled = ? WHERE id = ?`
 )

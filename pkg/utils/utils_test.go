@@ -88,3 +88,31 @@ func TestGenerateRequestID_Prefix(t *testing.T) {
 		t.Errorf("GenerateRequestID should have 'req_' prefix, got %s", reqID[:4])
 	}
 }
+
+func TestGenerateAccountID_Consistent(t *testing.T) {
+	providerID := "nvidia"
+	apiKeyHash := "abc123"
+	id1 := GenerateAccountID(providerID, apiKeyHash)
+	id2 := GenerateAccountID(providerID, apiKeyHash)
+	if id1 != id2 {
+		t.Errorf("GenerateAccountID should return consistent results: %s != %s", id1, id2)
+	}
+}
+
+func TestGenerateAccountID_DifferentProviders(t *testing.T) {
+	apiKeyHash := "abc123"
+	id1 := GenerateAccountID("nvidia", apiKeyHash)
+	id2 := GenerateAccountID("openai", apiKeyHash)
+	if id1 == id2 {
+		t.Errorf("GenerateAccountID should return different IDs for different providers")
+	}
+}
+
+func TestGenerateAccountID_DifferentKeys(t *testing.T) {
+	providerID := "nvidia"
+	id1 := GenerateAccountID(providerID, "key1")
+	id2 := GenerateAccountID(providerID, "key2")
+	if id1 == id2 {
+		t.Errorf("GenerateAccountID should return different IDs for different API keys")
+	}
+}

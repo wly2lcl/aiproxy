@@ -318,7 +318,7 @@ func (s *Server) initAccountPool(pc config.ProviderConfig) error {
 		}
 
 		account := &domain.Account{
-			ID:         utils.GenerateUUID(),
+			ID:         utils.GenerateAccountID(pc.Name, keyConfig.Key),
 			ProviderID: pc.Name,
 			APIKeyHash: keyConfig.Key,
 			Weight:     keyConfig.Weight,
@@ -517,15 +517,17 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 	}))
 
 	authConfig := &middleware.AuthConfig{
-		Enabled:    s.config.Auth.Enabled,
+		Enabled:    len(s.config.Auth.APIKeys) > 0 || s.storage != nil,
 		APIKeys:    make(map[string]bool),
-		HeaderName: s.config.Auth.HeaderName,
-		KeyPrefix:  s.config.Auth.KeyPrefix,
+		HeaderName: "Authorization",
+		KeyPrefix:  "Bearer ",
+		Storage:    s.storage,
 	}
 	for _, key := range s.config.Auth.APIKeys {
 		authConfig.APIKeys[key] = true
 	}
 	engine.Use(middleware.Auth(authConfig))
+	engine.Use(middleware.UpdateAPIKeyUsage(authConfig))
 
 	engine.POST("/v1/chat/completions", s.handleChatCompletions)
 	engine.GET("/v1/models", s.handleListModels)
@@ -586,11 +588,16 @@ func (s *Server) setupAdminAPI() (*http.Server, error) {
 	adminGroup.GET("/admin/accounts", s.handleAdminListAccounts)
 	adminGroup.GET("/admin/accounts/:id", s.handleAdminGetAccount)
 	adminGroup.GET("/admin/accounts/:id/limits", s.handleAdminGetAccountLimits)
+	adminGroup.GET("/admin/accounts/:id/models", s.handleAdminAccountModelStats)
 	adminGroup.POST("/admin/accounts", s.handleAdminCreateAccount)
 	adminGroup.PUT("/admin/accounts/:id", s.handleAdminUpdateAccount)
 	adminGroup.DELETE("/admin/accounts/:id", s.handleAdminDeleteAccount)
 	adminGroup.POST("/admin/accounts/:id/reset", s.handleAdminResetAccount)
 	adminGroup.POST("/admin/accounts/batch", s.handleAdminBatchAccountOperation)
+	adminGroup.GET("/admin/api-keys", s.handleAdminListAPIKeys)
+	adminGroup.POST("/admin/api-keys", s.handleAdminCreateAPIKey)
+	adminGroup.DELETE("/admin/api-keys/:id", s.handleAdminDeleteAPIKey)
+	adminGroup.PUT("/admin/api-keys/:id/toggle", s.handleAdminToggleAPIKey)
 	adminGroup.GET("/admin/stats", s.handleAdminStatsFromDB)
 	adminGroup.GET("/admin/stats/timeseries", s.handleAdminTimeSeries)
 	adminGroup.GET("/admin/stats/accounts", s.handleAdminAllAccountStats)
@@ -883,7 +890,13 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 		s.statsCollector.RecordTTFT(providerName, req.Model, ttft)
 	}
 
-	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, http.StatusOK, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", req.Stream)
+	reqBody := ""
+	respBody := ""
+	if s.config.Logging.IncludeRequestBody {
+		reqBodyJSON, _ := json.Marshal(req)
+		reqBody = string(reqBodyJSON)
+	}
+	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, http.StatusOK, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", "", reqBody, respBody, req.Stream)
 
 	slog.Info("stream completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency)
 }
@@ -941,7 +954,19 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 
 	s.statsCollector.RecordTTFT(providerName, req.Model, ttft)
 
-	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, resp.StatusCode, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", false)
+	reqBody := ""
+	respBody := ""
+	if s.config.Logging.IncludeRequestBody {
+		reqBodyJSON, _ := json.Marshal(req)
+		reqBody = string(reqBodyJSON)
+	}
+	if s.config.Logging.IncludeResponseBody {
+		respBody = string(bodyBytes)
+		if len(respBody) > 10000 {
+			respBody = respBody[:10000] + "...(truncated)"
+		}
+	}
+	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, resp.StatusCode, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", "", reqBody, respBody, false)
 
 	slog.Info("request completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency, "status", resp.StatusCode)
 }
@@ -1020,7 +1045,7 @@ func (s *Server) recordTokenUsage(accountID, providerID, model string, promptTok
 	}
 }
 
-func (s *Server) recordRequestLog(requestID, accountID, providerID, model string, status, tokens int, ttftMs, latencyMs float64, errorType string, isStreaming bool) {
+func (s *Server) recordRequestLog(requestID, accountID, providerID, model string, status, tokens int, ttftMs, latencyMs float64, errorType, errorMsg, requestBody, responseBody string, isStreaming bool) {
 	if s.storage == nil {
 		return
 	}
@@ -1028,17 +1053,20 @@ func (s *Server) recordRequestLog(requestID, accountID, providerID, model string
 		requestID = utils.GenerateUUID()
 	}
 	log := &storage.RequestLog{
-		RequestID:   requestID,
-		AccountID:   accountID,
-		ProviderID:  providerID,
-		Model:       model,
-		Status:      status,
-		Tokens:      tokens,
-		TTFTMs:      ttftMs,
-		LatencyMs:   latencyMs,
-		ErrorType:   errorType,
-		IsStreaming: isStreaming,
-		Timestamp:   time.Now(),
+		RequestID:    requestID,
+		AccountID:    accountID,
+		ProviderID:   providerID,
+		Model:        model,
+		Status:       status,
+		Tokens:       tokens,
+		TTFTMs:       ttftMs,
+		LatencyMs:    latencyMs,
+		ErrorType:    errorType,
+		ErrorMessage: errorMsg,
+		IsStreaming:  isStreaming,
+		Timestamp:    time.Now(),
+		RequestBody:  requestBody,
+		ResponseBody: responseBody,
 	}
 	if err := s.storage.RecordRequestLog(context.Background(), log); err != nil {
 		slog.Warn("failed to record request log", "error", err)
@@ -1688,20 +1716,139 @@ func (s *Server) handleAdminBatchAccountOperation(c *gin.Context) {
 
 func (s *Server) handleAdminLogDetail(c *gin.Context) {
 	requestID := c.Param("id")
-	logs, err := s.storage.GetRecentLogs(c.Request.Context(), 500)
+	log, err := s.storage.GetLogByID(c.Request.Context(), requestID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if log == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "log not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"log": log})
+}
+
+func (s *Server) handleAdminAccountModelStats(c *gin.Context) {
+	accountID := c.Param("id")
+	hours := 24
+	if h := c.Query("hours"); h != "" {
+		if parsed, err := fmt.Sscanf(h, "%d", &hours); err == nil && parsed == 1 {
+			if hours > 720 {
+				hours = 720
+			}
+		}
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	stats, err := s.storage.GetAccountModelStats(c.Request.Context(), accountID, since)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	for _, log := range logs {
-		if log.RequestID == requestID {
-			c.JSON(http.StatusOK, gin.H{"log": log})
-			return
-		}
+	c.JSON(http.StatusOK, gin.H{"account_id": accountID, "model_stats": stats})
+}
+
+func (s *Server) handleAdminListAPIKeys(c *gin.Context) {
+	keys, err := s.storage.ListAPIKeys(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "log not found"})
+	result := make([]map[string]interface{}, 0, len(keys))
+	for _, k := range keys {
+		result = append(result, map[string]interface{}{
+			"id":            k.ID,
+			"name":          k.Name,
+			"is_enabled":    k.IsEnabled,
+			"created_at":    k.CreatedAt.Format(time.RFC3339),
+			"last_used_at":  formatTime(k.LastUsedAt),
+			"request_count": k.RequestCount,
+			"expires_at":    formatTime(k.ExpiresAt),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"api_keys": result})
+}
+
+func (s *Server) handleAdminCreateAPIKey(c *gin.Context) {
+	var req struct {
+		Name      string     `json:"name"`
+		ExpiresAt *time.Time `json:"expires_at"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+
+	key := utils.GenerateUUID()
+	keyHash := utils.HashAPIKey(key)
+
+	id, err := s.storage.CreateAPIKey(c.Request.Context(), keyHash, req.Name, req.ExpiresAt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      id,
+		"key":     key,
+		"name":    req.Name,
+		"message": "API key created. Save the key now - it won't be shown again.",
+	})
+}
+
+func (s *Server) handleAdminDeleteAPIKey(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	if err := s.storage.DeleteAPIKey(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "API key deleted"})
+}
+
+func (s *Server) handleAdminToggleAPIKey(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := s.storage.ToggleAPIKey(c.Request.Context(), id, req.Enabled); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "API key updated"})
+}
+
+func formatTime(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 func (s *Server) handleAdminExport(c *gin.Context) {

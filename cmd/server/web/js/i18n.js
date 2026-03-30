@@ -36,7 +36,15 @@ const translations = {
     accountStats: '账号统计', modelStats: '模型统计', successRate: '成功率', totalTokensUsed: '总Token使用',
     batchEnable: '批量启用', batchDisable: '批量禁用', batchReset: '批量重置', selectedCount: '已选择',
     selectAll: '全选', exportCSV: '导出CSV', exportAccounts: '导出账号', exportModels: '导出模型', exportStats: '导出统计',
-    requestDetail: '请求详情', viewDetail: '查看详情', hourly: '按小时', daily: '按天'
+    requestDetail: '请求详情', viewDetail: '查看详情', hourly: '按小时', daily: '按天',
+    requestBody: '请求内容', responseBody: '响应内容', errorMessage: '错误信息',
+    noRequestBody: '无请求内容', noResponseBody: '无响应内容', copy: '复制', copied: '已复制',
+    apiKeys: 'API密钥', addAPIKey: '添加密钥', keyName: '密钥名称', keyValue: '密钥值',
+    apiKeyCreated: 'API密钥创建成功', apiKeyDeleted: 'API密钥删除成功', saveKeyNow: '请立即保存密钥，此密钥不会再次显示',
+    expiresAt: '过期时间', noExpiration: '永不过期', lastUsedTime: '最后使用',
+    modelUsageStats: '模型使用统计', viewModels: '查看模型', accountModelStats: '账号模型统计',
+    toggle: '切换', createAPIKey: '创建API密钥', deleteAPIKey: '删除API密钥',
+    deleteAPIKeyMsg: '确定要删除此API密钥吗？此操作不可撤销。', key: '密钥', showKey: '显示密钥', hideKey: '隐藏密钥'
   },
   en: {
     dashboard: 'Dashboard', accounts: 'Accounts', providers: 'Providers', stats: 'Stats', settings: 'Settings', logs: 'Request Logs',
@@ -75,6 +83,14 @@ const translations = {
     accountStats: 'Account Stats', modelStats: 'Model Stats', successRate: 'Success Rate', totalTokensUsed: 'Total Tokens',
     batchEnable: 'Batch Enable', batchDisable: 'Batch Disable', batchReset: 'Batch Reset', selectedCount: 'Selected',
     selectAll: 'Select All', exportCSV: 'Export CSV', exportAccounts: 'Export Accounts', exportModels: 'Export Models', exportStats: 'Export Stats',
-    requestDetail: 'Request Detail', viewDetail: 'View Detail', hourly: 'Hourly', daily: 'Daily'
+    requestDetail: 'Request Detail', viewDetail: 'View Detail', hourly: 'Hourly', daily: 'Daily',
+    requestBody: 'Request Body', responseBody: 'Response Body', errorMessage: 'Error Message',
+    noRequestBody: 'No request body', noResponseBody: 'No response body', copy: 'Copy', copied: 'Copied',
+    apiKeys: 'API Keys', addAPIKey: 'Add Key', keyName: 'Key Name', keyValue: 'Key Value',
+    apiKeyCreated: 'API key created successfully', apiKeyDeleted: 'API key deleted successfully', saveKeyNow: 'Save the key now - it won\'t be shown again',
+    expiresAt: 'Expires At', noExpiration: 'Never expires', lastUsedTime: 'Last Used',
+    modelUsageStats: 'Model Usage Stats', viewModels: 'View Models', accountModelStats: 'Account Model Statistics',
+    toggle: 'Toggle', createAPIKey: 'Create API Key', deleteAPIKey: 'Delete API Key',
+    deleteAPIKeyMsg: 'Are you sure you want to delete this API key? This action cannot be undone.', key: 'Key', showKey: 'Show Key', hideKey: 'Hide Key'
   }
 }

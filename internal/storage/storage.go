@@ -56,6 +56,9 @@ type Storage interface {
 	// Get recent request logs
 	GetRecentLogs(ctx context.Context, limit int) ([]*RequestLog, error)
 
+	// Get log by request ID with full body
+	GetLogByID(ctx context.Context, requestID string) (*RequestLog, error)
+
 	RecordRequestLog(ctx context.Context, log *RequestLog) error
 
 	// Time series data for charts
@@ -70,22 +73,47 @@ type Storage interface {
 	// Latency data for percentile calculation
 	GetLatencyData(ctx context.Context, since time.Time) ([]*LatencyData, error)
 
+	// Account model usage stats
+	GetAccountModelStats(ctx context.Context, accountID string, since time.Time) (map[string]int64, error)
+
+	// API Key management
+	CreateAPIKey(ctx context.Context, keyHash, name string, expiresAt *time.Time) (int64, error)
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error)
+	ListAPIKeys(ctx context.Context) ([]*APIKey, error)
+	UpdateAPIKeyUsage(ctx context.Context, keyHash string) error
+	DeleteAPIKey(ctx context.Context, id int64) error
+	ToggleAPIKey(ctx context.Context, id int64, enabled bool) error
+
 	Close() error
 }
 
 // RequestLog represents a recent request for display
 type RequestLog struct {
-	RequestID   string
-	AccountID   string
-	ProviderID  string
-	Model       string
-	Status      int
-	Tokens      int
-	TTFTMs      float64
-	LatencyMs   float64
-	ErrorType   string
-	Timestamp   time.Time
-	IsStreaming bool
+	RequestID    string
+	AccountID    string
+	ProviderID   string
+	Model        string
+	Status       int
+	Tokens       int
+	TTFTMs       float64
+	LatencyMs    float64
+	ErrorType    string
+	ErrorMessage string
+	Timestamp    time.Time
+	IsStreaming  bool
+	RequestBody  string
+	ResponseBody string
+}
+
+type APIKey struct {
+	ID           int64
+	KeyHash      string
+	Name         string
+	IsEnabled    bool
+	CreatedAt    time.Time
+	LastUsedAt   *time.Time
+	RequestCount int64
+	ExpiresAt    *time.Time
 }
 
 // TimeSeriesPoint represents a data point for time series charts
