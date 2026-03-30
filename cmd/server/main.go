@@ -903,6 +903,8 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 }
 
 func (s *Server) forwardUpstreamError(c *gin.Context, resp *http.Response) {
+	defer resp.Body.Close()
+
 	limitedReader := io.LimitReader(resp.Body, 64*1024)
 	bodyBytes, err := io.ReadAll(limitedReader)
 	if err != nil {
