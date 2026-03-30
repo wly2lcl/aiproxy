@@ -471,7 +471,9 @@ func (s *Server) initHTTPClient() {
 	}
 
 	s.httpClient = &http.Client{
-		Timeout: 10 * time.Minute,
+		// 不设全局 Timeout，由每次请求的 context.WithTimeout 统一控制
+		// 避免 http.Client.Timeout 与 context 超时竞争导致流式响应 EOF
+		Timeout: 0,
 		Transport: &http.Transport{
 			MaxIdleConns:          maxIdleConns,
 			MaxIdleConnsPerHost:   maxIdleConnsPerHost,
@@ -717,11 +719,14 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 		}
 
 		timeout := prov.GetTimeout(req.Stream)
+		// 注意：在循环体内不能使用 defer cancel()，因为 defer 不会在每次迭代时执行
+		// 而是在整个函数退出时才统一执行，这会导致 context 泄漏和相互干扰
 		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-		defer cancel()
 
 		resp, err := s.httpClient.Do(httpReq.WithContext(ctx))
 		if err != nil {
+			// 请求失败，立即释放 context 资源
+			cancel()
 			slog.Error("upstream request failed",
 				"error", err.Error(),
 				"error_type", fmt.Sprintf("%T", err),
@@ -737,7 +742,9 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			continue
 		}
 
+		// 5xx 或 429：需要重试，先释放 context 再 continue
 		if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+			cancel()
 			s.statsCollector.RecordError(providerName, mappedModel, "upstream_error")
 			s.recordAccountFailure(account.ID)
 			lastErr = fmt.Errorf("upstream returned status %d", resp.StatusCode)
@@ -745,7 +752,9 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			continue
 		}
 
+		// 4xx 客户端错误：转发错误后释放 context
 		if resp.StatusCode >= 400 {
+			cancel()
 			s.statsCollector.RecordError(providerName, mappedModel, "client_error")
 			s.forwardUpstreamError(c, resp)
 			return nil, nil, fmt.Errorf("client error: %d", resp.StatusCode)
@@ -753,11 +762,13 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 
 		s.recordAccountSuccess(account.ID)
 
+		// 成功：响应处理完成后再释放 context（流式需要读取 resp.Body）
 		if req.Stream {
 			s.handleStreamResponse(c, resp, account, providerName, req, startTime)
 		} else {
 			s.handleNonStreamResponse(c, resp, account, providerName, req, startTime)
 		}
+		cancel()
 
 		return resp, account, nil
 	}
@@ -766,7 +777,13 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 }
 
 func (s *Server) selectAvailableAccount(selector *pool.WeightedRoundRobin, providerName string) (*domain.Account, error) {
-	for {
+	// 计算最大尝试次数，避免所有账号熔断时无限循环导致 goroutine 泄漏
+	maxTries := len(s.circuitBreakers)*2 + 1
+	if maxTries < 10 {
+		maxTries = 10
+	}
+
+	for i := 0; i < maxTries; i++ {
 		account, err := selector.Select(context.Background(), nil)
 		if err != nil {
 			return nil, fmt.Errorf("no available accounts for provider: %s", providerName)
@@ -781,6 +798,8 @@ func (s *Server) selectAvailableAccount(selector *pool.WeightedRoundRobin, provi
 
 		return account, nil
 	}
+
+	return nil, fmt.Errorf("all accounts circuit open for provider: %s, no available account", providerName)
 }
 
 func (s *Server) sendModelNotFoundError(c *gin.Context, model string) {
