@@ -687,8 +687,10 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 	slog.Info("account selected", "account_id", account.ID[:8], "weight", account.Weight, "priority", account.Priority, "provider", providerName)
 
 	mappedModel := s.router.GetMappedModel(req.Model)
+	// 创建请求副本，使用 mappedModel 发送到上游
 	// 不直接修改 req.Model，避免 fallback 场景下污染原始请求
-	// req.Model = mappedModel  ← 已移除
+	reqCopy := *req
+	reqCopy.Model = mappedModel
 
 	retry := s.retries[providerName]
 
@@ -714,7 +716,7 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			slog.Info("retrying request", "attempt", attempt, "delay", delay, "provider", providerName, "account_id", account.ID[:8])
 		}
 
-		httpReq, err := prov.TransformRequest(req, account.APIKeyHash)
+		httpReq, err := prov.TransformRequest(&reqCopy, account.APIKeyHash)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -764,10 +766,10 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 		s.recordAccountSuccess(account.ID)
 
 		// 成功：响应处理完成后再释放 context（流式需要读取 resp.Body）
-		if req.Stream {
-			s.handleStreamResponse(c, resp, account, providerName, req, startTime)
+		if reqCopy.Stream {
+			s.handleStreamResponse(c, resp, account, providerName, &reqCopy, startTime)
 		} else {
-			s.handleNonStreamResponse(c, resp, account, providerName, req, startTime)
+			s.handleNonStreamResponse(c, resp, account, providerName, &reqCopy, startTime)
 		}
 		cancel()
 
