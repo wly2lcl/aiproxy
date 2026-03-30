@@ -37,7 +37,7 @@ var (
 	BuildTime = "unknown"
 )
 
-//go:embed web
+//go:embed web/*
 var webFS embed.FS
 
 type Server struct {
@@ -566,6 +566,8 @@ func (s *Server) setupAdminAPI() (*http.Server, error) {
 
 	engine.GET("/", s.handleDashboard)
 	engine.GET("/dashboard", s.handleDashboard)
+	engine.GET("/css/:filename", s.handleCSSFiles)
+	engine.GET("/js/:filename", s.handleJSFiles)
 
 	adminAuth := &middleware.AuthConfig{
 		Enabled:    len(s.config.Admin.APIKeys) > 0,
@@ -581,12 +583,17 @@ func (s *Server) setupAdminAPI() (*http.Server, error) {
 	adminGroup.Use(middleware.Auth(adminAuth))
 	adminGroup.GET("/admin/accounts", s.handleAdminListAccounts)
 	adminGroup.GET("/admin/accounts/:id", s.handleAdminGetAccount)
+	adminGroup.GET("/admin/accounts/:id/limits", s.handleAdminGetAccountLimits)
 	adminGroup.POST("/admin/accounts", s.handleAdminCreateAccount)
 	adminGroup.PUT("/admin/accounts/:id", s.handleAdminUpdateAccount)
 	adminGroup.DELETE("/admin/accounts/:id", s.handleAdminDeleteAccount)
 	adminGroup.POST("/admin/accounts/:id/reset", s.handleAdminResetAccount)
 	adminGroup.GET("/admin/stats", s.handleAdminStats)
 	adminGroup.GET("/admin/providers", s.handleAdminListProviders)
+	adminGroup.GET("/admin/providers/stats", s.handleAdminProviderStats)
+	adminGroup.GET("/admin/logs", s.handleAdminLogs)
+	adminGroup.GET("/admin/version", s.handleAdminVersion)
+	adminGroup.GET("/admin/model-mapping", s.handleAdminModelMapping)
 	adminGroup.POST("/admin/reload", s.handleAdminReload)
 	adminGroup.GET("/admin/health", s.handleHealth)
 
@@ -868,6 +875,8 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 		s.statsCollector.RecordTTFT(providerName, req.Model, ttft)
 	}
 
+	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, http.StatusOK, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", req.Stream)
+
 	slog.Info("stream completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency)
 }
 
@@ -923,6 +932,8 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 	}
 
 	s.statsCollector.RecordTTFT(providerName, req.Model, ttft)
+
+	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, resp.StatusCode, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", false)
 
 	slog.Info("request completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency, "status", resp.StatusCode)
 }
@@ -1001,6 +1012,31 @@ func (s *Server) recordTokenUsage(accountID, providerID, model string, promptTok
 	}
 }
 
+func (s *Server) recordRequestLog(requestID, accountID, providerID, model string, status, tokens int, ttftMs, latencyMs float64, errorType string, isStreaming bool) {
+	if s.storage == nil {
+		return
+	}
+	if requestID == "" {
+		requestID = utils.GenerateUUID()
+	}
+	log := &storage.RequestLog{
+		RequestID:   requestID,
+		AccountID:   accountID,
+		ProviderID:  providerID,
+		Model:       model,
+		Status:      status,
+		Tokens:      tokens,
+		TTFTMs:      ttftMs,
+		LatencyMs:   latencyMs,
+		ErrorType:   errorType,
+		IsStreaming: isStreaming,
+		Timestamp:   time.Now(),
+	}
+	if err := s.storage.RecordRequestLog(context.Background(), log); err != nil {
+		slog.Warn("failed to record request log", "error", err)
+	}
+}
+
 func (s *Server) handleListModels(c *gin.Context) {
 	models := s.router.ListModels()
 	modelList := &openai.ModelList{
@@ -1046,6 +1082,8 @@ func (s *Server) handleReady(c *gin.Context) {
 
 func (s *Server) handleAdminListAccounts(c *gin.Context) {
 	providerName := c.Query("provider")
+	statusFilter := c.Query("status")
+	availableFilter := c.Query("available")
 	result := make([]map[string]interface{}, 0)
 
 	lastUsedMap := make(map[string]string)
@@ -1063,13 +1101,35 @@ func (s *Server) handleAdminListAccounts(c *gin.Context) {
 		}
 		for _, acc := range p.List() {
 			state := p.GetState(acc.ID)
+
+			isAvailable := acc.IsEnabled && state.ConsecutiveFailures < domain.CircuitBreakerThreshold
+			isCircuitOpen := false
+			if cb, ok := s.circuitBreakers[acc.ID]; ok {
+				isCircuitOpen = !cb.Allow()
+			}
+
+			if statusFilter == "enabled" && !acc.IsEnabled {
+				continue
+			}
+			if statusFilter == "disabled" && acc.IsEnabled {
+				continue
+			}
+			if availableFilter == "true" && !isAvailable {
+				continue
+			}
+			if availableFilter == "false" && isAvailable {
+				continue
+			}
+
 			accountData := map[string]interface{}{
-				"id":          acc.ID,
-				"provider_id": acc.ProviderID,
-				"weight":      acc.Weight,
-				"priority":    acc.Priority,
-				"is_enabled":  acc.IsEnabled,
-				"available":   acc.IsEnabled && state.ConsecutiveFailures < domain.CircuitBreakerThreshold,
+				"id":                   acc.ID,
+				"provider_id":          acc.ProviderID,
+				"weight":               acc.Weight,
+				"priority":             acc.Priority,
+				"is_enabled":           acc.IsEnabled,
+				"available":            isAvailable,
+				"circuit_open":         isCircuitOpen,
+				"consecutive_failures": state.ConsecutiveFailures,
 			}
 			if lastUsed, ok := lastUsedMap[acc.ID]; ok {
 				accountData["last_used_at"] = lastUsed
@@ -1285,6 +1345,116 @@ func (s *Server) handleDashboard(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "text/html; charset=utf-8", html)
+}
+
+func (s *Server) handleCSSFiles(c *gin.Context) {
+	filename := c.Param("filename")
+	fullPath := "web/css/" + filename
+
+	data, err := webFS.ReadFile(fullPath)
+	if err != nil {
+		slog.Error("failed to read CSS file", "path", fullPath, "error", err)
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	c.Data(http.StatusOK, "text/css; charset=utf-8", data)
+}
+
+func (s *Server) handleJSFiles(c *gin.Context) {
+	filename := c.Param("filename")
+	fullPath := "web/js/" + filename
+
+	data, err := webFS.ReadFile(fullPath)
+	if err != nil {
+		slog.Error("failed to read JS file", "path", fullPath, "error", err)
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	c.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
+}
+
+func (s *Server) handleAdminGetAccountLimits(c *gin.Context) {
+	accountID := c.Param("id")
+
+	limits, err := s.storage.GetAllRateLimits(c.Request.Context(), accountID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"limits": limits})
+}
+
+func (s *Server) handleAdminProviderStats(c *gin.Context) {
+	providers := s.registry.List()
+	result := make([]map[string]interface{}, 0, len(providers))
+
+	for _, p := range providers {
+		providerName := p.Name()
+		accountCount := 0
+		availableCount := 0
+		circuitOpenCount := 0
+
+		if pool, ok := s.accountPools[providerName]; ok {
+			for _, acc := range pool.List() {
+				accountCount++
+				state := pool.GetState(acc.ID)
+				if acc.IsEnabled && state.ConsecutiveFailures < domain.CircuitBreakerThreshold {
+					availableCount++
+				}
+				if cb, ok := s.circuitBreakers[acc.ID]; ok && !cb.Allow() {
+					circuitOpenCount++
+				}
+			}
+		}
+
+		result = append(result, map[string]interface{}{
+			"name":               providerName,
+			"api_base":           p.APIBase(),
+			"models":             s.router.ListModels(),
+			"account_count":      accountCount,
+			"available_accounts": availableCount,
+			"circuit_open_count": circuitOpenCount,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"providers": result})
+}
+
+func (s *Server) handleAdminLogs(c *gin.Context) {
+	limit := 100
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := fmt.Sscanf(l, "%d", &limit); err == nil && parsed == 1 {
+			if limit > 500 {
+				limit = 500
+			}
+		}
+	}
+
+	logs, err := s.storage.GetRecentLogs(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"logs": logs})
+}
+
+func (s *Server) handleAdminVersion(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"version":    Version,
+		"build_time": BuildTime,
+	})
+}
+
+func (s *Server) handleAdminModelMapping(c *gin.Context) {
+	mapping := make(map[string]string)
+	for k, v := range s.config.ModelMapping {
+		mapping[k] = v
+	}
+	c.JSON(http.StatusOK, gin.H{"model_mapping": mapping})
 }
 
 func init() {

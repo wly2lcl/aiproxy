@@ -461,3 +461,129 @@ func (s *SQLite) CleanupExpiredRateLimits(ctx context.Context) error {
 
 	return nil
 }
+
+func (s *SQLite) GetAllRateLimits(ctx context.Context, accountID string) ([]*domain.LimitState, error) {
+	if accountID == "" {
+		return nil, fmt.Errorf("account id cannot be empty")
+	}
+
+	rows, err := s.db.QueryContext(ctx, getAllRateLimitsQuery, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rate limits: %w", err)
+	}
+	defer rows.Close()
+
+	var limits []*domain.LimitState
+	for rows.Next() {
+		var state domain.LimitState
+		var limitTypeStr string
+		var windowStart, windowEnd sql.NullTime
+		err := rows.Scan(
+			&limitTypeStr,
+			&state.Max,
+			&state.Current,
+			&windowStart,
+			&windowEnd,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan rate limit: %w", err)
+		}
+		state.Type = domain.LimitType(limitTypeStr)
+		if windowStart.Valid {
+			state.WindowStart = windowStart.Time
+		}
+		if windowEnd.Valid {
+			state.WindowEnd = windowEnd.Time
+		}
+		limits = append(limits, &state)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rate limits: %w", err)
+	}
+
+	return limits, nil
+}
+
+func (s *SQLite) GetRecentLogs(ctx context.Context, limit int) ([]*RequestLog, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := s.db.QueryContext(ctx, getRecentLogsQuery, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []*RequestLog
+	for rows.Next() {
+		var log RequestLog
+		var ttftMs, latencyMs sql.NullFloat64
+		var errorType sql.NullString
+		var isStreaming sql.NullBool
+		var timestamp sql.NullTime
+		err := rows.Scan(
+			&log.RequestID,
+			&log.AccountID,
+			&log.ProviderID,
+			&log.Model,
+			&log.Status,
+			&log.Tokens,
+			&ttftMs,
+			&latencyMs,
+			&errorType,
+			&timestamp,
+			&isStreaming,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan log: %w", err)
+		}
+		if ttftMs.Valid {
+			log.TTFTMs = ttftMs.Float64
+		}
+		if latencyMs.Valid {
+			log.LatencyMs = latencyMs.Float64
+		}
+		if errorType.Valid {
+			log.ErrorType = errorType.String
+		}
+		if timestamp.Valid {
+			log.Timestamp = timestamp.Time
+		}
+		if isStreaming.Valid {
+			log.IsStreaming = isStreaming.Bool
+		}
+		logs = append(logs, &log)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating logs: %w", err)
+	}
+
+	return logs, nil
+}
+
+func (s *SQLite) RecordRequestLog(ctx context.Context, log *RequestLog) error {
+	if log == nil {
+		return fmt.Errorf("log cannot be nil")
+	}
+
+	_, err := s.db.ExecContext(ctx, recordRequestLogQuery,
+		log.RequestID,
+		log.AccountID,
+		log.ProviderID,
+		log.Model,
+		log.Status,
+		log.Tokens,
+		log.TTFTMs,
+		log.LatencyMs,
+		log.ErrorType,
+		log.IsStreaming,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record request log: %w", err)
+	}
+
+	return nil
+}

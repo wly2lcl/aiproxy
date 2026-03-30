@@ -50,5 +50,28 @@ type Storage interface {
 
 	CleanupExpiredRateLimits(ctx context.Context) error
 
+	// Get all rate limit states for an account
+	GetAllRateLimits(ctx context.Context, accountID string) ([]*domain.LimitState, error)
+
+	// Get recent request logs
+	GetRecentLogs(ctx context.Context, limit int) ([]*RequestLog, error)
+
+	RecordRequestLog(ctx context.Context, log *RequestLog) error
+
 	Close() error
+}
+
+// RequestLog represents a recent request for display
+type RequestLog struct {
+	RequestID   string
+	AccountID   string
+	ProviderID  string
+	Model       string
+	Status      int
+	Tokens      int
+	TTFTMs      float64
+	LatencyMs   float64
+	ErrorType   string
+	Timestamp   time.Time
+	IsStreaming bool
 }

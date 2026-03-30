@@ -87,5 +87,6 @@ dist/
 
 # Test artifacts
 test_output/
-# Binary
-server
+
+# Binary (root level only)
+/server

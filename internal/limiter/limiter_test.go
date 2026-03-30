@@ -130,6 +130,28 @@ func (m *mockStorage) GetAllAccountLastUsed(ctx context.Context) (map[string]tim
 	return make(map[string]time.Time), nil
 }
 
+func (m *mockStorage) GetAllRateLimits(ctx context.Context, accountID string) ([]*domain.LimitState, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limits, ok := m.rateLimits[accountID]; ok {
+		result := make([]*domain.LimitState, 0, len(limits))
+		for _, state := range limits {
+			result = append(result, state)
+		}
+		return result, nil
+	}
+	return nil, nil
+}
+
+func (m *mockStorage) GetRecentLogs(ctx context.Context, limit int) ([]*storage.RequestLog, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) RecordRequestLog(ctx context.Context, log *storage.RequestLog) error {
+	return nil
+}
+
 func TestRPM_Allow_UnderLimit(t *testing.T) {
 	store := newMockStorage()
 	limiter := NewRPM(store, 10)

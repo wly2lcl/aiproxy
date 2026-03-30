@@ -93,4 +93,20 @@ SELECT value FROM config_state WHERE key = 'schema_version'`
 	setSchemaVersionQuery = `
 INSERT INTO config_state (key, value) VALUES ('schema_version', ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+
+	getAllRateLimitsQuery = `
+SELECT limit_type, max_value, current_value, window_start, window_end
+FROM account_limits
+WHERE account_id = ? AND window_start <= datetime('now') AND window_end > datetime('now')
+ORDER BY limit_type`
+
+	getRecentLogsQuery = `
+SELECT request_id, account_id, provider_id, model, status, tokens, ttft_ms, latency_ms, error_type, created_at, is_streaming
+FROM request_logs
+ORDER BY created_at DESC
+LIMIT ?`
+
+	recordRequestLogQuery = `
+INSERT INTO request_logs (request_id, account_id, provider_id, model, status, tokens, ttft_ms, latency_ms, error_type, is_streaming)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 )
