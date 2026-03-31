@@ -159,6 +159,39 @@ func ApplyDefaults(cfg *Config) {
 	if cfg.RequestID.HeaderName == "" {
 		cfg.RequestID.HeaderName = "X-Request-ID"
 	}
+
+	if cfg.Auth.AuthFailureRateLimit == 0 {
+		cfg.Auth.AuthFailureRateLimit = 5
+	}
+	if cfg.Auth.AuthFailureWindow == "" {
+		cfg.Auth.AuthFailureWindow = "15m"
+	}
+	if cfg.Auth.AuthFailureBlockTime == "" {
+		cfg.Auth.AuthFailureBlockTime = "30m"
+	}
+
+	if len(cfg.CORS.AllowedMethods) == 0 {
+		cfg.CORS.AllowedMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	}
+	if len(cfg.CORS.AllowedHeaders) == 0 {
+		cfg.CORS.AllowedHeaders = []string{"Content-Type", "Authorization", "X-Request-ID"}
+	}
+	if cfg.CORS.MaxAge == 0 {
+		cfg.CORS.MaxAge = 600
+	}
+
+	if cfg.SecurityHeaders.XFrameOptions == "" {
+		cfg.SecurityHeaders.XFrameOptions = "DENY"
+	}
+	if cfg.SecurityHeaders.XContentTypeOptions == "" {
+		cfg.SecurityHeaders.XContentTypeOptions = "nosniff"
+	}
+	if cfg.SecurityHeaders.XXSSProtection == "" {
+		cfg.SecurityHeaders.XXSSProtection = "1; mode=block"
+	}
+	if cfg.SecurityHeaders.ReferrerPolicy == "" {
+		cfg.SecurityHeaders.ReferrerPolicy = "strict-origin-when-cross-origin"
+	}
 }
 
 func ApplyEnvironmentOverrides(cfg *Config) {

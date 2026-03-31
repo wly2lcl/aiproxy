@@ -43,6 +43,12 @@ func Validate(cfg *Config) error {
 	if err := validateRequestIDConfig(&cfg.RequestID); err != nil {
 		return err
 	}
+	if err := validateCORSConfig(&cfg.CORS); err != nil {
+		return err
+	}
+	if err := validateSecurityHeadersConfig(&cfg.SecurityHeaders); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -322,6 +328,33 @@ func validateRateLimitsConfig(cfg *RateLimitsConfig) error {
 func validateRequestIDConfig(cfg *RequestIDConfig) error {
 	if cfg.HeaderName == "" {
 		return newConfigError("request_id.header_name", "is required", cfg.HeaderName)
+	}
+	return nil
+}
+
+func validateCORSConfig(cfg *CORSConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if len(cfg.AllowedOrigins) == 0 {
+		return newConfigError("cors.allowed_origins", "is required when CORS is enabled", nil)
+	}
+	if cfg.MaxAge < 0 {
+		return newConfigError("cors.max_age", "must be non-negative", cfg.MaxAge)
+	}
+	if cfg.AllowCredentials {
+		for _, o := range cfg.AllowedOrigins {
+			if o == "*" {
+				return newConfigError("cors.allowed_origins", "cannot contain '*' when allow_credentials is true (browsers reject this for security)", nil)
+			}
+		}
+	}
+	return nil
+}
+
+func validateSecurityHeadersConfig(cfg *SecurityHeadersConfig) error {
+	if !cfg.Enabled {
+		return nil
 	}
 	return nil
 }

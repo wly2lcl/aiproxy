@@ -34,10 +34,35 @@ type LoggingConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled    bool     `json:"enabled"`
-	APIKeys    []string `json:"api_keys"`
-	HeaderName string   `json:"header_name"`
-	KeyPrefix  string   `json:"key_prefix"`
+	Enabled              bool     `json:"enabled"`
+	APIKeys              []string `json:"api_keys"`
+	HeaderName           string   `json:"header_name"`
+	KeyPrefix            string   `json:"key_prefix"`
+	AuthFailureRateLimit int      `json:"auth_failure_rate_limit"` // Max auth failures per IP before blocking (default: 5)
+	AuthFailureWindow    string   `json:"auth_failure_window"`     // Window duration for auth failure tracking (default: "15m")
+	AuthFailureBlockTime string   `json:"auth_failure_block_time"` // How long to block after exceeding limit (default: "30m")
+}
+
+// CORSConfig defines Cross-Origin Resource Sharing settings
+type CORSConfig struct {
+	Enabled          bool     `json:"enabled"`           // Enable CORS middleware
+	AllowedOrigins   []string `json:"allowed_origins"`   // List of allowed origins (use ["*"] for all)
+	AllowedMethods   []string `json:"allowed_methods"`   // Allowed HTTP methods
+	AllowedHeaders   []string `json:"allowed_headers"`   // Allowed request headers
+	ExposedHeaders   []string `json:"exposed_headers"`   // Headers exposed to client
+	AllowCredentials bool     `json:"allow_credentials"` // Allow credentials (cookies, auth headers)
+	MaxAge           int      `json:"max_age"`           // Preflight cache duration in seconds
+}
+
+// SecurityHeadersConfig defines security-related HTTP headers
+type SecurityHeadersConfig struct {
+	Enabled                 bool   `json:"enabled"`                   // Enable security headers middleware
+	XFrameOptions           string `json:"x_frame_options"`           // X-Frame-Options header (default: "DENY")
+	XContentTypeOptions     string `json:"x_content_type_options"`    // X-Content-Type-Options (default: "nosniff")
+	XXSSProtection          string `json:"x_xss_protection"`          // X-XSS-Protection (default: "1; mode=block")
+	ContentSecurityPolicy   string `json:"content_security_policy"`   // CSP header
+	StrictTransportSecurity string `json:"strict_transport_security"` // HSTS header
+	ReferrerPolicy          string `json:"referrer_policy"`           // Referrer-Policy header
 }
 
 type AccountKeyConfig struct {
@@ -132,17 +157,19 @@ type HTTPTransportConfig struct {
 }
 
 type Config struct {
-	Server        ServerConfig        `json:"server"`
-	Database      DatabaseConfig      `json:"database"`
-	Logging       LoggingConfig       `json:"logging"`
-	Auth          AuthConfig          `json:"auth"`
-	Providers     []ProviderConfig    `json:"providers"`
-	ModelMapping  ModelMappingConfig  `json:"model_mapping"`
-	Fallback      FallbackConfig      `json:"fallback"`
-	Admin         AdminConfig         `json:"admin"`
-	Metrics       MetricsConfig       `json:"metrics"`
-	TokenTracking TokenTrackingConfig `json:"token_tracking"`
-	RateLimits    RateLimitsConfig    `json:"rate_limits"`
-	RequestID     RequestIDConfig     `json:"request_id"`
-	HTTPTransport HTTPTransportConfig `json:"http_transport"`
+	Server          ServerConfig          `json:"server"`
+	Database        DatabaseConfig        `json:"database"`
+	Logging         LoggingConfig         `json:"logging"`
+	Auth            AuthConfig            `json:"auth"`
+	Providers       []ProviderConfig      `json:"providers"`
+	ModelMapping    ModelMappingConfig    `json:"model_mapping"`
+	Fallback        FallbackConfig        `json:"fallback"`
+	Admin           AdminConfig           `json:"admin"`
+	Metrics         MetricsConfig         `json:"metrics"`
+	TokenTracking   TokenTrackingConfig   `json:"token_tracking"`
+	RateLimits      RateLimitsConfig      `json:"rate_limits"`
+	RequestID       RequestIDConfig       `json:"request_id"`
+	HTTPTransport   HTTPTransportConfig   `json:"http_transport"`
+	CORS            CORSConfig            `json:"cors"`
+	SecurityHeaders SecurityHeadersConfig `json:"security_headers"`
 }

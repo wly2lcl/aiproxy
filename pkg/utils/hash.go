@@ -2,6 +2,7 @@ package utils
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 )
 
@@ -11,10 +12,10 @@ func HashAPIKey(key string) string {
 }
 
 func VerifyAPIKey(key, hash string) bool {
-	return HashAPIKey(key) == hash
+	keyHash := HashAPIKey(key)
+	return subtle.ConstantTimeCompare([]byte(keyHash), []byte(hash)) == 1
 }
 
-// GenerateAccountID generates a stable account ID based on provider ID and API key hash
 func GenerateAccountID(providerID, apiKeyHash string) string {
 	hash := sha256.Sum256([]byte(providerID + ":" + apiKeyHash))
 	return hex.EncodeToString(hash[:])

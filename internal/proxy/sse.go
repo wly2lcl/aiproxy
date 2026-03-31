@@ -138,11 +138,7 @@ func (h *StreamHandler) ServeStream(w http.ResponseWriter, r *http.Request, upst
 
 		if chunk != nil {
 			if chunk.Usage != nil {
-				prompt, completion, found := h.tokenExtractor.ExtractFromStream(chunk)
-				if found {
-					_ = prompt
-					_ = completion
-				}
+				h.tokenExtractor.ExtractFromStream(chunk)
 			} else if h.tokenExtractor.IsHybridMode() && len(chunk.Choices) > 0 {
 				h.tokenExtractor.AccumulateText(chunk.Choices[0].Delta.Content)
 			}

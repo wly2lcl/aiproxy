@@ -498,6 +498,8 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 		IncludeRequestBody:  s.config.Logging.IncludeRequestBody,
 		IncludeResponseBody: s.config.Logging.IncludeResponseBody,
 	}))
+	engine.Use(middleware.SecurityHeaders(&s.config.SecurityHeaders))
+	engine.Use(middleware.CORS(&s.config.CORS))
 
 	engine.GET("/health", s.handleHealth)
 	engine.GET("/ready", s.handleReady)
@@ -508,39 +510,23 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 	}
 
 	if s.config.Admin.Enabled {
-		engine.GET("/", s.handleDashboard)
-		engine.GET("/dashboard", s.handleDashboard)
-		engine.GET("/css/:filename", s.handleCSSFiles)
-		engine.GET("/js/:filename", s.handleJSFiles)
-	}
-
-	authConfig := &middleware.AuthConfig{
-		Enabled:    len(s.config.Auth.APIKeys) > 0 || s.storage != nil,
-		APIKeys:    make(map[string]bool),
-		HeaderName: "Authorization",
-		KeyPrefix:  "Bearer ",
-		Storage:    s.storage,
-	}
-	for _, key := range s.config.Auth.APIKeys {
-		authConfig.APIKeys[key] = true
-	}
-
-	apiGroup := engine.Group("")
-	apiGroup.Use(middleware.Auth(authConfig))
-	apiGroup.Use(middleware.UpdateAPIKeyUsage(authConfig))
-	apiGroup.POST("/v1/chat/completions", s.handleChatCompletions)
-	apiGroup.GET("/v1/models", s.handleListModels)
-
-	if s.config.Admin.Enabled {
 		adminAuth := &middleware.AuthConfig{
-			Enabled:    len(s.config.Admin.APIKeys) > 0,
-			APIKeys:    make(map[string]bool),
-			HeaderName: "Authorization",
-			KeyPrefix:  "Bearer ",
+			Enabled:              len(s.config.Admin.APIKeys) > 0,
+			APIKeys:              make(map[string]bool),
+			HeaderName:           "Authorization",
+			KeyPrefix:            "Bearer ",
+			AuthFailureRateLimit: s.config.Auth.AuthFailureRateLimit,
+			AuthFailureWindow:    parseDuration(s.config.Auth.AuthFailureWindow, 15*time.Minute),
+			AuthFailureBlockTime: parseDuration(s.config.Auth.AuthFailureBlockTime, 30*time.Minute),
 		}
 		for _, key := range s.config.Admin.APIKeys {
 			adminAuth.APIKeys[key] = true
 		}
+
+		engine.GET("/", s.handleDashboard)
+		engine.GET("/dashboard", s.handleDashboard)
+		engine.GET("/css/:filename", s.handleCSSFiles)
+		engine.GET("/js/:filename", s.handleJSFiles)
 
 		adminGroup := engine.Group("/admin")
 		adminGroup.Use(middleware.Auth(adminAuth))
@@ -572,6 +558,26 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 		adminGroup.GET("/health", s.handleHealth)
 	}
 
+	authConfig := &middleware.AuthConfig{
+		Enabled:              len(s.config.Auth.APIKeys) > 0 || s.storage != nil,
+		APIKeys:              make(map[string]bool),
+		HeaderName:           "Authorization",
+		KeyPrefix:            "Bearer ",
+		Storage:              s.storage,
+		AuthFailureRateLimit: s.config.Auth.AuthFailureRateLimit,
+		AuthFailureWindow:    parseDuration(s.config.Auth.AuthFailureWindow, 15*time.Minute),
+		AuthFailureBlockTime: parseDuration(s.config.Auth.AuthFailureBlockTime, 30*time.Minute),
+	}
+	for _, key := range s.config.Auth.APIKeys {
+		authConfig.APIKeys[key] = true
+	}
+
+	apiGroup := engine.Group("")
+	apiGroup.Use(middleware.Auth(authConfig))
+	apiGroup.Use(middleware.UpdateAPIKeyUsage(authConfig))
+	apiGroup.POST("/v1/chat/completions", s.handleChatCompletions)
+	apiGroup.GET("/v1/models", s.handleListModels)
+
 	readTimeout, _ := time.ParseDuration(s.config.Server.ReadTimeout)
 	writeTimeout, _ := time.ParseDuration(s.config.Server.WriteTimeout)
 	idleTimeout, _ := time.ParseDuration(s.config.Server.IdleTimeout)
@@ -598,6 +604,28 @@ func (s *Server) handleChatCompletions(c *gin.Context) {
 				Message: fmt.Sprintf("invalid request body: %s", err.Error()),
 				Type:    "invalid_request_error",
 				Code:    "invalid_request",
+			},
+		})
+		return
+	}
+
+	if !middleware.ValidateModelName(req.Model) {
+		c.JSON(http.StatusBadRequest, openai.ErrorResponse{
+			Error: openai.ErrorDetail{
+				Message: "invalid model name format",
+				Type:    "invalid_request_error",
+				Code:    "invalid_model",
+			},
+		})
+		return
+	}
+
+	if len(req.Messages) == 0 {
+		c.JSON(http.StatusBadRequest, openai.ErrorResponse{
+			Error: openai.ErrorDetail{
+				Message: "messages array cannot be empty",
+				Type:    "invalid_request_error",
+				Code:    "invalid_messages",
 			},
 		})
 		return
