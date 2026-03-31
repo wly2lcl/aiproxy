@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,12 +18,22 @@ type APIKeyValidator interface {
 	UpdateAPIKeyUsage(ctx context.Context, keyHash string) error
 }
 
+type SecurityStorage interface {
+	BlockIP(ctx context.Context, ip, reason string) error
+	UnblockIP(ctx context.Context, ip string) error
+	GetBlockedIPs(ctx context.Context) ([]storage.BlockedIP, error)
+	RecordAuthFailure(ctx context.Context, ip string) error
+	ClearAuthFailure(ctx context.Context, ip string) error
+	GetAuthFailures(ctx context.Context) ([]storage.AuthFailure, error)
+}
+
 type AuthConfig struct {
 	Enabled              bool
 	APIKeys              map[string]bool
 	HeaderName           string
 	KeyPrefix            string
 	Storage              APIKeyValidator
+	SecurityStore        SecurityStorage
 	AuthFailureRateLimit int
 	AuthFailureWindow    time.Duration
 	AuthFailureBlockTime time.Duration
@@ -81,6 +92,13 @@ func (t *authFailureTracker) ClearFailure(ip string) {
 	delete(t.failures, ip)
 }
 
+func (t *authFailureTracker) ClearBlock(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.blockList, ip)
+	delete(t.failures, ip)
+}
+
 func (t *authFailureTracker) IsBlocked(ip string, blockTime time.Duration) bool {
 	t.mu.RLock()
 	blockedAt, exists := t.blockList[ip]
@@ -130,6 +148,99 @@ func (t *authFailureTracker) maybeCleanLocked(now time.Time, window time.Duratio
 	}
 }
 
+func (t *authFailureTracker) LoadFromDB(ctx context.Context, store SecurityStorage, blockTime time.Duration) error {
+	blockedIPs, err := store.GetBlockedIPs(ctx)
+	if err != nil {
+		return err
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now()
+	for _, ip := range blockedIPs {
+		elapsed := now.Sub(ip.BlockedAt)
+		if elapsed < blockTime {
+			t.blockList[ip.IP] = ip.BlockedAt
+		}
+	}
+
+	failures, err := store.GetAuthFailures(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range failures {
+		if now.Sub(f.FirstSeen) < blockTime {
+			t.failures[f.IP] = &authFailureRecord{
+				count:     f.FailureCount,
+				firstSeen: f.FirstSeen,
+			}
+		}
+	}
+
+	slog.Info("loaded security data from database", "blocked_ips", len(t.blockList), "failures", len(t.failures))
+	return nil
+}
+
+type BlockedIPInfo struct {
+	IP            string    `json:"ip"`
+	BlockedAt     time.Time `json:"blocked_at"`
+	RemainingTime int       `json:"remaining_time_seconds"`
+}
+
+type AuthFailureInfo struct {
+	IP        string    `json:"ip"`
+	Count     int       `json:"count"`
+	FirstSeen time.Time `json:"first_seen"`
+}
+
+func GetBlockedIPs(blockTime time.Duration) []BlockedIPInfo {
+	globalAuthTracker.mu.RLock()
+	defer globalAuthTracker.mu.RUnlock()
+
+	now := time.Now()
+	var result []BlockedIPInfo
+	for ip, blockedAt := range globalAuthTracker.blockList {
+		elapsed := now.Sub(blockedAt)
+		if elapsed < blockTime {
+			remaining := int((blockTime - elapsed).Seconds())
+			result = append(result, BlockedIPInfo{
+				IP:            ip,
+				BlockedAt:     blockedAt,
+				RemainingTime: remaining,
+			})
+		}
+	}
+	return result
+}
+
+func GetAuthFailures(window time.Duration) []AuthFailureInfo {
+	globalAuthTracker.mu.RLock()
+	defer globalAuthTracker.mu.RUnlock()
+
+	now := time.Now()
+	var result []AuthFailureInfo
+	for ip, record := range globalAuthTracker.failures {
+		if now.Sub(record.firstSeen) <= window {
+			result = append(result, AuthFailureInfo{
+				IP:        ip,
+				Count:     record.count,
+				FirstSeen: record.firstSeen,
+			})
+		}
+	}
+	return result
+}
+
+func UnblockIP(ip string) {
+	globalAuthTracker.ClearBlock(ip)
+}
+
+func InitSecurityFromDB(ctx context.Context, store SecurityStorage, blockTime time.Duration) error {
+	return globalAuthTracker.LoadFromDB(ctx, store, blockTime)
+}
+
 func Auth(cfg *AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !cfg.Enabled {
@@ -139,24 +250,16 @@ func Auth(cfg *AuthConfig) gin.HandlerFunc {
 
 		clientIP := c.ClientIP()
 
-		if cfg.AuthFailureRateLimit > 0 && globalAuthTracker.IsBlocked(clientIP, cfg.AuthFailureBlockTime) {
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error": "too many authentication failures, please try again later",
-			})
-			c.Abort()
-			return
-		}
-
 		authHeader := c.GetHeader(cfg.HeaderName)
 		if authHeader == "" {
-			cfg.recordFailureIfNeeded(clientIP)
+			cfg.recordFailureIfNeeded(c.Request.Context(), clientIP)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
 			c.Abort()
 			return
 		}
 
 		if !strings.HasPrefix(authHeader, cfg.KeyPrefix) {
-			cfg.recordFailureIfNeeded(clientIP)
+			cfg.recordFailureIfNeeded(c.Request.Context(), clientIP)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
 			c.Abort()
 			return
@@ -165,7 +268,11 @@ func Auth(cfg *AuthConfig) gin.HandlerFunc {
 		key := strings.TrimPrefix(authHeader, cfg.KeyPrefix)
 
 		if cfg.APIKeys[key] {
-			globalAuthTracker.ClearFailure(clientIP)
+			globalAuthTracker.ClearBlock(clientIP)
+			if cfg.SecurityStore != nil {
+				cfg.SecurityStore.UnblockIP(c.Request.Context(), clientIP)
+				cfg.SecurityStore.ClearAuthFailure(c.Request.Context(), clientIP)
+			}
 			c.Set("api_key", key)
 			c.Next()
 			return
@@ -175,7 +282,11 @@ func Auth(cfg *AuthConfig) gin.HandlerFunc {
 			keyHash := utils.HashAPIKey(key)
 			apiKey, err := cfg.Storage.GetAPIKeyByHash(c.Request.Context(), keyHash)
 			if err == nil && apiKey != nil && apiKey.IsEnabled {
-				globalAuthTracker.ClearFailure(clientIP)
+				globalAuthTracker.ClearBlock(clientIP)
+				if cfg.SecurityStore != nil {
+					cfg.SecurityStore.UnblockIP(c.Request.Context(), clientIP)
+					cfg.SecurityStore.ClearAuthFailure(c.Request.Context(), clientIP)
+				}
 				c.Set("api_key", key)
 				c.Set("api_key_id", apiKey.ID)
 				c.Set("api_key_name", apiKey.Name)
@@ -185,17 +296,36 @@ func Auth(cfg *AuthConfig) gin.HandlerFunc {
 			}
 		}
 
-		cfg.recordFailureIfNeeded(clientIP)
+		if cfg.AuthFailureRateLimit > 0 && globalAuthTracker.IsBlocked(clientIP, cfg.AuthFailureBlockTime) {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error": "too many authentication failures, please try again later",
+			})
+			c.Abort()
+			return
+		}
+
+		cfg.recordFailureIfNeeded(c.Request.Context(), clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
 		c.Abort()
 	}
 }
 
-func (cfg *AuthConfig) recordFailureIfNeeded(ip string) {
-	if cfg.AuthFailureRateLimit > 0 {
-		globalAuthTracker.RecordFailure(ip, cfg.AuthFailureWindow)
-		if globalAuthTracker.GetFailureCount(ip, cfg.AuthFailureWindow) >= cfg.AuthFailureRateLimit {
-			globalAuthTracker.Block(ip)
+func (cfg *AuthConfig) recordFailureIfNeeded(ctx context.Context, ip string) {
+	if cfg.AuthFailureRateLimit <= 0 {
+		return
+	}
+
+	globalAuthTracker.RecordFailure(ip, cfg.AuthFailureWindow)
+
+	if cfg.SecurityStore != nil {
+		cfg.SecurityStore.RecordAuthFailure(ctx, ip)
+	}
+
+	count := globalAuthTracker.GetFailureCount(ip, cfg.AuthFailureWindow)
+	if count >= cfg.AuthFailureRateLimit {
+		globalAuthTracker.Block(ip)
+		if cfg.SecurityStore != nil {
+			cfg.SecurityStore.BlockIP(ctx, ip, "exceeded auth failure limit")
 		}
 	}
 }

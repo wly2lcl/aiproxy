@@ -44,7 +44,11 @@ const translations = {
     expiresAt: '过期时间', noExpiration: '永不过期', lastUsedTime: '最后使用',
     modelUsageStats: '模型使用统计', viewModels: '查看模型', accountModelStats: '账号模型统计',
     toggle: '切换', createAPIKey: '创建API密钥', deleteAPIKey: '删除API密钥',
-    deleteAPIKeyMsg: '确定要删除此API密钥吗？此操作不可撤销。', key: '密钥', showKey: '显示密钥', hideKey: '隐藏密钥'
+    deleteAPIKeyMsg: '确定要删除此API密钥吗？此操作不可撤销。', key: '密钥', showKey: '显示密钥', hideKey: '隐藏密钥',
+    security: '安全管理', blockedIPs: '被封禁IP', authFailures: '认证失败记录', noBlockedIPs: '暂无被封禁IP',
+    noAuthFailures: '暂无认证失败记录', ipAddress: 'IP地址', blockedAt: '封禁时间', remainingTime: '剩余时间',
+    failureCount: '失败次数', firstSeen: '首次失败', unblock: '解禁', ipUnblocked: 'IP已解禁',
+    unblockIP: '解禁IP', unblockIPMsg: '确定要解禁此IP吗？', searchIP: '搜索IP...'
   },
   en: {
     dashboard: 'Dashboard', accounts: 'Accounts', providers: 'Providers', stats: 'Stats', settings: 'Settings', logs: 'Request Logs',
@@ -91,6 +95,10 @@ const translations = {
     expiresAt: 'Expires At', noExpiration: 'Never expires', lastUsedTime: 'Last Used',
     modelUsageStats: 'Model Usage Stats', viewModels: 'View Models', accountModelStats: 'Account Model Statistics',
     toggle: 'Toggle', createAPIKey: 'Create API Key', deleteAPIKey: 'Delete API Key',
-    deleteAPIKeyMsg: 'Are you sure you want to delete this API key? This action cannot be undone.', key: 'Key', showKey: 'Show Key', hideKey: 'Hide Key'
+    deleteAPIKeyMsg: 'Are you sure you want to delete this API key? This action cannot be undone.', key: 'Key', showKey: 'Show Key', hideKey: 'Hide Key',
+    security: 'Security', blockedIPs: 'Blocked IPs', authFailures: 'Auth Failures', noBlockedIPs: 'No blocked IPs',
+    noAuthFailures: 'No auth failure records', ipAddress: 'IP Address', blockedAt: 'Blocked At', remainingTime: 'Remaining',
+    failureCount: 'Failure Count', firstSeen: 'First Seen', unblock: 'Unblock', ipUnblocked: 'IP unblocked',
+    unblockIP: 'Unblock IP', unblockIPMsg: 'Are you sure you want to unblock this IP?', searchIP: 'Search IP...'
   }
 }

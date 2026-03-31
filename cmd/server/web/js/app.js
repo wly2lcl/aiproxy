@@ -35,7 +35,10 @@ const app = Vue.createApp({
       providerModal: { show: false, provider: null },
       logDetailModal: { show: false, log: null },
       accountModelsModal: { show: false, accountId: '', models: {} },
-      apiKeyModal: { show: false, newKey: null }
+      apiKeyModal: { show: false, newKey: null },
+      blockedIPs: [],
+      authFailures: [],
+      securitySearch: ''
     }
   },
   computed: {
@@ -47,6 +50,7 @@ const app = Vue.createApp({
         { id: 'providers', label: this.t('providers'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>' },
         { id: 'logs', label: this.t('logs'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>' },
         { id: 'stats', label: this.t('stats'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>' },
+        { id: 'security', label: this.t('security'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>' },
         { id: 'apikeys', label: this.t('apiKeys'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>' },
         { id: 'settings', label: this.t('settings'), icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' }
       ]
@@ -78,6 +82,10 @@ const app = Vue.createApp({
           this.initCharts()
           this.initTrendChart()
         })
+      }
+      if (v === 'security') {
+        this.fetchBlockedIPs()
+        this.fetchAuthFailures()
       }
     },
     autoRefresh(v) {
@@ -305,6 +313,37 @@ const app = Vue.createApp({
         await this.apiCall(`/admin/api-keys/${id}/toggle`, { method: 'PUT', body: JSON.stringify({ enabled }) })
         await this.fetchAPIKeys()
       } catch (e) { this.showToast(e.message, 'error') }
+    },
+    async fetchBlockedIPs() {
+      try { const d = await this.apiCall('/admin/security/blocked-ips'); this.blockedIPs = d.blocked_ips || [] }
+      catch (e) {}
+    },
+    async fetchAuthFailures() {
+      try { const d = await this.apiCall('/admin/security/auth-failures'); this.authFailures = d.failures || [] }
+      catch (e) {}
+    },
+    async unblockIP(ip) {
+      try {
+        await this.apiCall(`/admin/security/blocked-ips/${encodeURIComponent(ip)}`, { method: 'DELETE' })
+        this.showToast(this.t('ipUnblocked'), 'success')
+        await this.fetchBlockedIPs()
+      } catch (e) { this.showToast(e.message, 'error') }
+    },
+    formatRemainingTime(seconds) {
+      if (!seconds || seconds <= 0) return '-'
+      const mins = Math.floor(seconds / 60)
+      const secs = seconds % 60
+      return `${mins}m ${secs}s`
+    },
+    filteredBlockedIPs() {
+      if (!this.securitySearch) return this.blockedIPs
+      const search = this.securitySearch.toLowerCase()
+      return this.blockedIPs.filter(ip => ip.ip.toLowerCase().includes(search))
+    },
+    filteredAuthFailures() {
+      if (!this.securitySearch) return this.authFailures
+      const search = this.securitySearch.toLowerCase()
+      return this.authFailures.filter(f => f.ip.toLowerCase().includes(search))
     },
     copyToClipboard(text) {
       navigator.clipboard.writeText(text)

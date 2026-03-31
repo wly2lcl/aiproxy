@@ -201,4 +201,34 @@ DELETE FROM api_keys WHERE id = ?`
 
 	toggleAPIKeyQuery = `
 UPDATE api_keys SET is_enabled = ? WHERE id = ?`
+
+	blockIPQuery = `
+INSERT INTO blocked_ips (ip, reason)
+VALUES (?, ?)
+ON CONFLICT(ip) DO UPDATE SET
+	blocked_at = datetime('now'),
+	reason = excluded.reason`
+
+	unblockIPQuery = `
+DELETE FROM blocked_ips WHERE ip = ?`
+
+	getBlockedIPsQuery = `
+SELECT ip, blocked_at, reason
+FROM blocked_ips
+ORDER BY blocked_at DESC`
+
+	recordAuthFailureQuery = `
+INSERT INTO auth_failures (ip, failure_count, first_seen, last_seen)
+VALUES (?, 1, datetime('now'), datetime('now'))
+ON CONFLICT(ip) DO UPDATE SET
+	failure_count = failure_count + 1,
+	last_seen = datetime('now')`
+
+	clearAuthFailureQuery = `
+DELETE FROM auth_failures WHERE ip = ?`
+
+	getAuthFailuresQuery = `
+SELECT ip, failure_count, first_seen, last_seen
+FROM auth_failures
+ORDER BY failure_count DESC`
 )

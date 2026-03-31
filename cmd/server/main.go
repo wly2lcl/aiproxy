@@ -515,6 +515,7 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 			APIKeys:              make(map[string]bool),
 			HeaderName:           "Authorization",
 			KeyPrefix:            "Bearer ",
+			SecurityStore:        s.storage,
 			AuthFailureRateLimit: s.config.Auth.AuthFailureRateLimit,
 			AuthFailureWindow:    parseDuration(s.config.Auth.AuthFailureWindow, 15*time.Minute),
 			AuthFailureBlockTime: parseDuration(s.config.Auth.AuthFailureBlockTime, 30*time.Minute),
@@ -556,6 +557,9 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 		adminGroup.GET("/export/:type", s.handleAdminExport)
 		adminGroup.POST("/reload", s.handleAdminReload)
 		adminGroup.GET("/health", s.handleHealth)
+		adminGroup.GET("/security/blocked-ips", s.handleAdminBlockedIPs)
+		adminGroup.DELETE("/security/blocked-ips/:ip", s.handleAdminUnblockIP)
+		adminGroup.GET("/security/auth-failures", s.handleAdminAuthFailures)
 	}
 
 	authConfig := &middleware.AuthConfig{
@@ -564,12 +568,21 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 		HeaderName:           "Authorization",
 		KeyPrefix:            "Bearer ",
 		Storage:              s.storage,
+		SecurityStore:        s.storage,
 		AuthFailureRateLimit: s.config.Auth.AuthFailureRateLimit,
 		AuthFailureWindow:    parseDuration(s.config.Auth.AuthFailureWindow, 15*time.Minute),
 		AuthFailureBlockTime: parseDuration(s.config.Auth.AuthFailureBlockTime, 30*time.Minute),
 	}
 	for _, key := range s.config.Auth.APIKeys {
 		authConfig.APIKeys[key] = true
+	}
+
+	blockTime := parseDuration(s.config.Auth.AuthFailureBlockTime, 30*time.Minute)
+	slog.Info("security config", "rate_limit", s.config.Auth.AuthFailureRateLimit, "block_time", blockTime)
+	if s.storage != nil {
+		if err := middleware.InitSecurityFromDB(context.Background(), s.storage, blockTime); err != nil {
+			slog.Warn("failed to load blocked IPs from database", "error", err)
+		}
 	}
 
 	apiGroup := engine.Group("")
@@ -1885,6 +1898,45 @@ func (s *Server) handleAdminExport(c *gin.Context) {
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid export type"})
 	}
+}
+
+func (s *Server) handleAdminBlockedIPs(c *gin.Context) {
+	blockTime := parseDuration(s.config.Auth.AuthFailureBlockTime, 30*time.Minute)
+	blockedIPs := middleware.GetBlockedIPs(blockTime)
+
+	c.JSON(http.StatusOK, gin.H{
+		"blocked_ips": blockedIPs,
+		"total":       len(blockedIPs),
+	})
+}
+
+func (s *Server) handleAdminUnblockIP(c *gin.Context) {
+	ip := c.Param("ip")
+	if ip == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "IP address is required"})
+		return
+	}
+
+	middleware.UnblockIP(ip)
+
+	if s.storage != nil {
+		if err := s.storage.UnblockIP(c.Request.Context(), ip); err != nil {
+			slog.Warn("failed to unblock IP in database", "ip", ip, "error", err)
+		}
+		s.storage.ClearAuthFailure(c.Request.Context(), ip)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "IP unblocked successfully", "ip": ip})
+}
+
+func (s *Server) handleAdminAuthFailures(c *gin.Context) {
+	window := parseDuration(s.config.Auth.AuthFailureWindow, 15*time.Minute)
+	failures := middleware.GetAuthFailures(window)
+
+	c.JSON(http.StatusOK, gin.H{
+		"failures": failures,
+		"total":    len(failures),
+	})
 }
 
 func init() {

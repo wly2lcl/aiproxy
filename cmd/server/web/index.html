@@ -479,6 +479,49 @@
           </div>
         </div>
 
+        <!-- Security -->
+        <div v-if="currentView==='security'" class="space-y-6">
+          <div class="flex justify-between items-center">
+            <input v-model="securitySearch" type="text" :placeholder="t('searchIP')" class="px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm w-64">
+            <button @click="fetchBlockedIPs(); fetchAuthFailures();" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">{{ t('refresh') }}</button>
+          </div>
+          
+          <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+            <h3 class="font-semibold mb-4 flex items-center gap-2">
+              <span>{{ t('blockedIPs') }}</span>
+              <span class="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">{{ blockedIPs.length }}</span>
+            </h3>
+            <div v-if="blockedIPs.length" class="space-y-2">
+              <div v-for="ip in filteredBlockedIPs()" :key="ip.ip" class="flex items-center justify-between p-3 bg-gray-700/50 rounded">
+                <div class="flex items-center gap-4">
+                  <span class="font-mono text-sm">{{ ip.ip }}</span>
+                  <span class="text-xs text-gray-400">{{ t('blockedAt') }}: {{ formatDate(ip.blocked_at) }}</span>
+                  <span class="text-xs text-yellow-400">{{ t('remainingTime') }}: {{ formatRemainingTime(ip.remaining_time_seconds) }}</span>
+                </div>
+                <button @click="unblockIP(ip.ip)" class="px-3 py-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded text-xs">{{ t('unblock') }}</button>
+              </div>
+            </div>
+            <p v-else class="text-gray-500 text-center py-4">{{ t('noBlockedIPs') }}</p>
+          </div>
+
+          <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+            <h3 class="font-semibold mb-4 flex items-center gap-2">
+              <span>{{ t('authFailures') }}</span>
+              <span class="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded">{{ authFailures.length }}</span>
+            </h3>
+            <div v-if="authFailures.length" class="space-y-2">
+              <div v-for="f in filteredAuthFailures()" :key="f.ip" class="flex items-center justify-between p-3 bg-gray-700/50 rounded">
+                <div class="flex items-center gap-4">
+                  <span class="font-mono text-sm">{{ f.ip }}</span>
+                  <span class="text-xs text-gray-400">{{ t('firstSeen') }}: {{ formatDate(f.first_seen) }}</span>
+                </div>
+                <span class="px-2 py-1 bg-red-500/20 text-red-400 rounded text-xs">{{ f.count }} {{ t('failureCount') }}</span>
+              </div>
+            </div>
+            <p v-else class="text-gray-500 text-center py-4">{{ t('noAuthFailures') }}</p>
+          </div>
+        </div>
+
         <!-- API Keys -->
         <div v-if="currentView==='apikeys'">
           <div class="flex justify-between items-center mb-4">

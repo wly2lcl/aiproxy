@@ -902,3 +902,95 @@ func (s *SQLite) ToggleAPIKey(ctx context.Context, id int64, enabled bool) error
 	}
 	return nil
 }
+
+func (s *SQLite) BlockIP(ctx context.Context, ip, reason string) error {
+	_, err := s.db.ExecContext(ctx, blockIPQuery, ip, reason)
+	if err != nil {
+		return fmt.Errorf("failed to block ip: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLite) UnblockIP(ctx context.Context, ip string) error {
+	_, err := s.db.ExecContext(ctx, unblockIPQuery, ip)
+	if err != nil {
+		return fmt.Errorf("failed to unblock ip: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLite) GetBlockedIPs(ctx context.Context) ([]BlockedIP, error) {
+	rows, err := s.db.QueryContext(ctx, getBlockedIPsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get blocked ips: %w", err)
+	}
+	defer rows.Close()
+
+	ips := make([]BlockedIP, 0)
+	for rows.Next() {
+		var ip BlockedIP
+		var blockedAtStr string
+		var reason sql.NullString
+		if err := rows.Scan(&ip.IP, &blockedAtStr, &reason); err != nil {
+			return nil, fmt.Errorf("failed to scan blocked ip: %w", err)
+		}
+		ip.BlockedAt, _ = time.Parse(time.RFC3339, blockedAtStr)
+		if ip.BlockedAt.IsZero() {
+			ip.BlockedAt, _ = time.Parse("2006-01-02 15:04:05", blockedAtStr)
+		}
+		if reason.Valid {
+			ip.Reason = reason.String
+		}
+		ips = append(ips, ip)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate blocked ips: %w", err)
+	}
+	return ips, nil
+}
+
+func (s *SQLite) RecordAuthFailure(ctx context.Context, ip string) error {
+	_, err := s.db.ExecContext(ctx, recordAuthFailureQuery, ip)
+	if err != nil {
+		return fmt.Errorf("failed to record auth failure: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLite) ClearAuthFailure(ctx context.Context, ip string) error {
+	_, err := s.db.ExecContext(ctx, clearAuthFailureQuery, ip)
+	if err != nil {
+		return fmt.Errorf("failed to clear auth failure: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLite) GetAuthFailures(ctx context.Context) ([]AuthFailure, error) {
+	rows, err := s.db.QueryContext(ctx, getAuthFailuresQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get auth failures: %w", err)
+	}
+	defer rows.Close()
+
+	failures := make([]AuthFailure, 0)
+	for rows.Next() {
+		var f AuthFailure
+		var firstSeenStr, lastSeenStr string
+		if err := rows.Scan(&f.IP, &f.FailureCount, &firstSeenStr, &lastSeenStr); err != nil {
+			return nil, fmt.Errorf("failed to scan auth failure: %w", err)
+		}
+		f.FirstSeen, _ = time.Parse(time.RFC3339, firstSeenStr)
+		if f.FirstSeen.IsZero() {
+			f.FirstSeen, _ = time.Parse("2006-01-02 15:04:05", firstSeenStr)
+		}
+		f.LastSeen, _ = time.Parse(time.RFC3339, lastSeenStr)
+		if f.LastSeen.IsZero() {
+			f.LastSeen, _ = time.Parse("2006-01-02 15:04:05", lastSeenStr)
+		}
+		failures = append(failures, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate auth failures: %w", err)
+	}
+	return failures, nil
+}

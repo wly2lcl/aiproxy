@@ -84,7 +84,30 @@ type Storage interface {
 	DeleteAPIKey(ctx context.Context, id int64) error
 	ToggleAPIKey(ctx context.Context, id int64, enabled bool) error
 
+	// Security - IP blocking and auth failure tracking
+	BlockIP(ctx context.Context, ip, reason string) error
+	UnblockIP(ctx context.Context, ip string) error
+	GetBlockedIPs(ctx context.Context) ([]BlockedIP, error)
+	RecordAuthFailure(ctx context.Context, ip string) error
+	ClearAuthFailure(ctx context.Context, ip string) error
+	GetAuthFailures(ctx context.Context) ([]AuthFailure, error)
+
 	Close() error
+}
+
+// BlockedIP represents a blocked IP address
+type BlockedIP struct {
+	IP        string
+	BlockedAt time.Time
+	Reason    string
+}
+
+// AuthFailure represents an authentication failure record
+type AuthFailure struct {
+	IP           string
+	FailureCount int
+	FirstSeen    time.Time
+	LastSeen     time.Time
 }
 
 // RequestLog represents a recent request for display

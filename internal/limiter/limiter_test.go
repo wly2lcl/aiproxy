@@ -204,6 +204,31 @@ func (m *mockStorage) ToggleAPIKey(ctx context.Context, id int64, enabled bool) 
 	return nil
 }
 
+// Security methods - IP blocking and auth failure tracking
+func (m *mockStorage) BlockIP(ctx context.Context, ip, reason string) error {
+	return nil
+}
+
+func (m *mockStorage) UnblockIP(ctx context.Context, ip string) error {
+	return nil
+}
+
+func (m *mockStorage) GetBlockedIPs(ctx context.Context) ([]storage.BlockedIP, error) {
+	return nil, nil
+}
+
+func (m *mockStorage) RecordAuthFailure(ctx context.Context, ip string) error {
+	return nil
+}
+
+func (m *mockStorage) ClearAuthFailure(ctx context.Context, ip string) error {
+	return nil
+}
+
+func (m *mockStorage) GetAuthFailures(ctx context.Context) ([]storage.AuthFailure, error) {
+	return nil, nil
+}
+
 func TestRPM_Allow_UnderLimit(t *testing.T) {
 	store := newMockStorage()
 	limiter := NewRPM(store, 10)
