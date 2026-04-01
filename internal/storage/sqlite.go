@@ -676,8 +676,15 @@ func (s *SQLite) GetRequestTimeSeries(ctx context.Context, since time.Time, inte
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan time series point: %w", err)
 		}
-		p.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
+		p.Timestamp, err = time.Parse("2006-01-02 15:04:05", tsStr)
+		if err != nil {
+			slog.Error("failed to parse timestamp", "timestamp", tsStr, "error", err)
+		}
 		points = append(points, &p)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating time series: %w", err)
 	}
 
 	return points, nil
@@ -934,9 +941,13 @@ func (s *SQLite) GetBlockedIPs(ctx context.Context) ([]BlockedIP, error) {
 		if err := rows.Scan(&ip.IP, &blockedAtStr, &reason); err != nil {
 			return nil, fmt.Errorf("failed to scan blocked ip: %w", err)
 		}
-		ip.BlockedAt, _ = time.Parse(time.RFC3339, blockedAtStr)
-		if ip.BlockedAt.IsZero() {
-			ip.BlockedAt, _ = time.Parse("2006-01-02 15:04:05", blockedAtStr)
+		ip.BlockedAt, err = time.Parse(time.RFC3339, blockedAtStr)
+		if err != nil {
+			slog.Debug("failed to parse blocked_at as RFC3339, trying alternative format", "blocked_at", blockedAtStr, "error", err)
+			ip.BlockedAt, err = time.Parse("2006-01-02 15:04:05", blockedAtStr)
+			if err != nil {
+				slog.Error("failed to parse blocked_at timestamp", "blocked_at", blockedAtStr, "error", err)
+			}
 		}
 		if reason.Valid {
 			ip.Reason = reason.String
@@ -979,13 +990,21 @@ func (s *SQLite) GetAuthFailures(ctx context.Context) ([]AuthFailure, error) {
 		if err := rows.Scan(&f.IP, &f.FailureCount, &firstSeenStr, &lastSeenStr); err != nil {
 			return nil, fmt.Errorf("failed to scan auth failure: %w", err)
 		}
-		f.FirstSeen, _ = time.Parse(time.RFC3339, firstSeenStr)
-		if f.FirstSeen.IsZero() {
-			f.FirstSeen, _ = time.Parse("2006-01-02 15:04:05", firstSeenStr)
+		f.FirstSeen, err = time.Parse(time.RFC3339, firstSeenStr)
+		if err != nil {
+			slog.Debug("failed to parse first_seen as RFC3339, trying alternative format", "first_seen", firstSeenStr, "error", err)
+			f.FirstSeen, err = time.Parse("2006-01-02 15:04:05", firstSeenStr)
+			if err != nil {
+				slog.Error("failed to parse first_seen timestamp", "first_seen", firstSeenStr, "error", err)
+			}
 		}
-		f.LastSeen, _ = time.Parse(time.RFC3339, lastSeenStr)
-		if f.LastSeen.IsZero() {
-			f.LastSeen, _ = time.Parse("2006-01-02 15:04:05", lastSeenStr)
+		f.LastSeen, err = time.Parse(time.RFC3339, lastSeenStr)
+		if err != nil {
+			slog.Debug("failed to parse last_seen as RFC3339, trying alternative format", "last_seen", lastSeenStr, "error", err)
+			f.LastSeen, err = time.Parse("2006-01-02 15:04:05", lastSeenStr)
+			if err != nil {
+				slog.Error("failed to parse last_seen timestamp", "last_seen", lastSeenStr, "error", err)
+			}
 		}
 		failures = append(failures, f)
 	}

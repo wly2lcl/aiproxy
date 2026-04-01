@@ -23,7 +23,7 @@ type ChatConfig struct {
 	Pool                *pool.Pool
 	Router              *router.Router
 	Proxy               *proxy.Proxy
-	Limiter             *limiter.CompositeLimiter
+	Limiters            map[string]*limiter.CompositeLimiter
 	Collector           *stats.Collector
 	MaxResponseBodySize int64
 	Logger              interface {
@@ -36,7 +36,7 @@ type ChatHandler struct {
 	pool                *pool.Pool
 	router              *router.Router
 	proxy               *proxy.Proxy
-	limiter             *limiter.CompositeLimiter
+	limiters            map[string]*limiter.CompositeLimiter
 	collector           *stats.Collector
 	logger              Logger
 	selector            *pool.WeightedRoundRobin
@@ -51,8 +51,8 @@ func NewChatHandler(cfg *ChatConfig) (*ChatHandler, error) {
 	}
 
 	var selector *pool.WeightedRoundRobin
-	if cfg.Pool != nil && cfg.Limiter != nil {
-		selector = pool.NewWeightedRoundRobin(cfg.Pool, cfg.Limiter)
+	if cfg.Pool != nil && cfg.Limiters != nil {
+		selector = pool.NewWeightedRoundRobin(cfg.Pool, cfg.Limiters)
 	}
 
 	maxResponseBodySize := cfg.MaxResponseBodySize
@@ -64,7 +64,7 @@ func NewChatHandler(cfg *ChatConfig) (*ChatHandler, error) {
 		pool:                cfg.Pool,
 		router:              cfg.Router,
 		proxy:               cfg.Proxy,
-		limiter:             cfg.Limiter,
+		limiters:            cfg.Limiters,
 		collector:           cfg.Collector,
 		logger:              cfg.Logger,
 		selector:            selector,
@@ -103,33 +103,48 @@ func (h *ChatHandler) Handle(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	account, err := h.selectAccount(ctx, prov)
-	if err != nil {
-		if err == pool.ErrNoAvailableAccount {
-			h.sendError(c, http.StatusServiceUnavailable, domain.ErrCodeNoAvailableAccount, "no available account")
+	const maxAccountRetries = 3
+	var account *domain.Account
+
+	for retry := 0; retry < maxAccountRetries; retry++ {
+		account, err = h.selectAccount(ctx, prov)
+		if err != nil {
+			if err == pool.ErrNoAvailableAccount {
+				h.sendError(c, http.StatusServiceUnavailable, domain.ErrCodeNoAvailableAccount, "no available account")
+				return
+			}
+			if domainErr, ok := err.(*domain.DomainError); ok && domainErr.Code == domain.ErrCodeRateLimitExceeded {
+				c.Header("Retry-After", "60")
+				h.sendError(c, http.StatusTooManyRequests, domain.ErrCodeRateLimitExceeded, "rate limit exceeded")
+				return
+			}
+			h.sendError(c, http.StatusServiceUnavailable, "account_error", err.Error())
 			return
 		}
-		if domainErr, ok := err.(*domain.DomainError); ok && domainErr.Code == domain.ErrCodeRateLimitExceeded {
-			c.Header("Retry-After", "60")
-			h.sendError(c, http.StatusTooManyRequests, domain.ErrCodeRateLimitExceeded, "rate limit exceeded")
-			return
+
+		// Check rate limit for selected account
+		if h.limiters != nil {
+			if limiter, ok := h.limiters[account.ID]; ok && limiter != nil {
+				allowed, limitErr := limiter.Allow(ctx, account.ID)
+				if limitErr != nil {
+					h.sendError(c, http.StatusInternalServerError, "rate_limit_error", limitErr.Error())
+					return
+				}
+				if !allowed {
+					h.recordRateLimitHit(account.ID)
+					// Try another account instead of returning error immediately
+					continue
+				}
+			}
 		}
-		h.sendError(c, http.StatusServiceUnavailable, "account_error", err.Error())
-		return
+		// Account is available, proceed
+		break
 	}
 
-	if h.limiter != nil {
-		allowed, limitErr := h.limiter.Allow(ctx, account.ID)
-		if limitErr != nil {
-			h.sendError(c, http.StatusInternalServerError, "rate_limit_error", limitErr.Error())
-			return
-		}
-		if !allowed {
-			h.recordRateLimitHit(account.ID)
-			c.Header("Retry-After", "60")
-			h.sendError(c, http.StatusTooManyRequests, domain.ErrCodeRateLimitExceeded, "rate limit exceeded")
-			return
-		}
+	if account == nil {
+		c.Header("Retry-After", "60")
+		h.sendError(c, http.StatusTooManyRequests, domain.ErrCodeRateLimitExceeded, "rate limit exceeded")
+		return
 	}
 
 	bodyBytes, err := json.Marshal(&req)
@@ -205,8 +220,10 @@ func (h *ChatHandler) handleStream(c *gin.Context, resp *http.Response, account 
 	if found {
 		totalTokens := promptTokens + completionTokens
 		h.recordUsage(prov.Name(), req.Model, http.StatusOK, latency, totalTokens)
-		if h.limiter != nil {
-			_ = h.limiter.Record(c.Request.Context(), account.ID, totalTokens)
+		if h.limiters != nil {
+			if limiter, ok := h.limiters[account.ID]; ok && limiter != nil {
+				_ = limiter.Record(c.Request.Context(), account.ID, totalTokens)
+			}
 		}
 	} else {
 		h.recordUsage(prov.Name(), req.Model, http.StatusOK, latency, 0)
@@ -240,8 +257,10 @@ func (h *ChatHandler) handleNonStream(c *gin.Context, resp *http.Response, accou
 	var chatResp openai.ChatCompletionResponse
 	if err := json.Unmarshal(bodyBytes, &chatResp); err == nil && chatResp.Usage != nil {
 		h.recordUsage(prov.Name(), req.Model, resp.StatusCode, latency, chatResp.Usage.TotalTokens)
-		if h.limiter != nil {
-			_ = h.limiter.Record(c.Request.Context(), account.ID, chatResp.Usage.TotalTokens)
+		if h.limiters != nil {
+			if limiter, ok := h.limiters[account.ID]; ok && limiter != nil {
+				_ = limiter.Record(c.Request.Context(), account.ID, chatResp.Usage.TotalTokens)
+			}
 		}
 	} else {
 		h.recordUsage(prov.Name(), req.Model, resp.StatusCode, latency, 0)

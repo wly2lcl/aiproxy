@@ -244,7 +244,11 @@ func TestSelector_WeightedRoundRobin(t *testing.T) {
 
 	ml := newMockLimiter()
 	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
 
 	ctx := context.Background()
 	selected := make(map[string]int)
@@ -265,9 +269,7 @@ func TestSelector_WeightedRoundRobin(t *testing.T) {
 func TestSelector_NoAvailableAccount(t *testing.T) {
 	p := NewPool(nil)
 
-	ml := newMockLimiter()
-	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	selector := NewWeightedRoundRobin(p, map[string]*limiter.CompositeLimiter{})
 
 	ctx := context.Background()
 	_, err := selector.Select(ctx, nil)
@@ -286,7 +288,11 @@ func TestSelector_RateLimitFilter(t *testing.T) {
 	ml.setAllowed("acc1", false)
 
 	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
 
 	ctx := context.Background()
 
@@ -313,7 +319,11 @@ func TestSelector_CircuitBreakerFilter(t *testing.T) {
 
 	ml := newMockLimiter()
 	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
 
 	ctx := context.Background()
 
@@ -336,7 +346,11 @@ func TestSelector_WeightDistribution(t *testing.T) {
 
 	ml := newMockLimiter()
 	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
 
 	ctx := context.Background()
 	selected := make(map[string]int)
@@ -401,7 +415,11 @@ func TestSelector_DisabledAccount(t *testing.T) {
 
 	ml := newMockLimiter()
 	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
 
 	ctx := context.Background()
 
@@ -424,7 +442,11 @@ func TestSelector_ZeroWeight(t *testing.T) {
 
 	ml := newMockLimiter()
 	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
 
 	ctx := context.Background()
 
@@ -448,7 +470,10 @@ func TestSelector_AllFiltered(t *testing.T) {
 	ml.setAllowed("acc1", false)
 
 	composite := limiter.NewCompositeLimiter(ml)
-	selector := NewWeightedRoundRobin(p, composite)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
 
 	ctx := context.Background()
 	_, err := selector.Select(ctx, nil)

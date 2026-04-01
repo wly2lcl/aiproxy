@@ -221,10 +221,10 @@ func validateProviderAPIKeys(idx int, p *ProviderConfig) error {
 	seenKeys := make(map[string]bool)
 	for j, key := range p.APIKeys {
 		if key.Key == "" {
-			return newConfigError(fmt.Sprintf("providers[%d].api_keys[%d].key", idx, j), "is required", key.Key)
+			return newConfigError(fmt.Sprintf("providers[%d].api_keys[%d].key", idx, j), "is required", nil)
 		}
 		if seenKeys[key.Key] {
-			return newConfigError(fmt.Sprintf("providers[%d].api_keys[%d].key", idx, j), "must be unique", key.Key)
+			return newConfigError(fmt.Sprintf("providers[%d].api_keys[%d].key", idx, j), "must be unique", nil)
 		}
 		seenKeys[key.Key] = true
 		if key.Weight < 0 {

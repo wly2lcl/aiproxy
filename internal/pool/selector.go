@@ -22,17 +22,17 @@ type weightedAccount struct {
 }
 
 type WeightedRoundRobin struct {
-	pool    *Pool
-	limiter *limiter.CompositeLimiter
-	mu      sync.Mutex
-	weights map[string]*weightedAccount
+	pool     *Pool
+	limiters map[string]*limiter.CompositeLimiter
+	mu       sync.Mutex
+	weights  map[string]*weightedAccount
 }
 
-func NewWeightedRoundRobin(pool *Pool, limiter *limiter.CompositeLimiter) *WeightedRoundRobin {
+func NewWeightedRoundRobin(pool *Pool, limiters map[string]*limiter.CompositeLimiter) *WeightedRoundRobin {
 	return &WeightedRoundRobin{
-		pool:    pool,
-		limiter: limiter,
-		weights: make(map[string]*weightedAccount),
+		pool:     pool,
+		limiters: limiters,
+		weights:  make(map[string]*weightedAccount),
 	}
 }
 
@@ -45,10 +45,12 @@ func (w *WeightedRoundRobin) Select(ctx context.Context, limits []domain.LimitTy
 	// Filter by rate limiter
 	var eligible []*AccountState
 	for _, state := range available {
-		if w.limiter != nil {
-			allowed, err := w.limiter.Allow(ctx, state.Account.ID)
-			if err != nil || !allowed {
-				continue
+		if w.limiters != nil {
+			if limiter, ok := w.limiters[state.Account.ID]; ok && limiter != nil {
+				allowed, err := limiter.Allow(ctx, state.Account.ID)
+				if err != nil || !allowed {
+					continue
+				}
 			}
 		}
 		eligible = append(eligible, state)

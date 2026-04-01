@@ -342,11 +342,7 @@ func (s *Server) initAccountPool(pc config.ProviderConfig) error {
 	p := pool.NewPool(accounts)
 	s.accountPools[pc.Name] = p
 
-	if compositeLimiter, ok := s.limiters[pc.Name]; ok {
-		s.selectors[pc.Name] = pool.NewWeightedRoundRobin(p, compositeLimiter)
-	} else {
-		s.selectors[pc.Name] = pool.NewWeightedRoundRobin(p, nil)
-	}
+	s.selectors[pc.Name] = pool.NewWeightedRoundRobin(p, s.limiters)
 
 	// Initialize retry for provider
 	s.retries[pc.Name] = resilience.NewRetry(&resilience.RetryConfig{
@@ -539,11 +535,14 @@ func (s *Server) setupPublicAPI() (*http.Server, error) {
 			adminAuth.APIKeys[key] = true
 		}
 
+		// Dashboard is always public (browser cannot add Authorization header)
 		engine.GET("/", s.handleDashboard)
 		engine.GET("/dashboard", s.handleDashboard)
+		// Static assets (CSS/JS) are public
 		engine.GET("/css/:filename", s.handleCSSFiles)
 		engine.GET("/js/:filename", s.handleJSFiles)
 
+		// Admin API requires authentication
 		adminGroup := engine.Group("/admin")
 		adminGroup.Use(middleware.Auth(adminAuth))
 		adminGroup.GET("/accounts", s.handleAdminListAccounts)
@@ -756,8 +755,10 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 		maxAttempts = retry.GetMaxAttempts()
 	}
 
+	var failedAccounts []string // Track failed accounts to exclude from retry
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		account, err := s.selectAvailableAccount(c.Request.Context(), selector, providerName)
+		account, err := s.selectAvailableAccount(c.Request.Context(), selector, providerName, failedAccounts)
 		if err != nil {
 			if attempt == 1 {
 				return nil, nil, err
@@ -807,6 +808,7 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			)
 			s.statsCollector.RecordError(providerName, mappedModel, "request_failed")
 			s.recordAccountFailure(account.ID)
+			failedAccounts = append(failedAccounts, account.ID)
 			lastErr = err
 			continue
 		}
@@ -816,6 +818,7 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			cancel()
 			s.statsCollector.RecordError(providerName, mappedModel, "upstream_error")
 			s.recordAccountFailure(account.ID)
+			failedAccounts = append(failedAccounts, account.ID)
 			lastErr = fmt.Errorf("upstream returned status %d", resp.StatusCode)
 			resp.Body.Close()
 			continue
@@ -845,7 +848,7 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 	return nil, nil, lastErr
 }
 
-func (s *Server) selectAvailableAccount(ctx context.Context, selector *pool.WeightedRoundRobin, providerName string) (*domain.Account, error) {
+func (s *Server) selectAvailableAccount(ctx context.Context, selector *pool.WeightedRoundRobin, providerName string, excludeAccounts []string) (*domain.Account, error) {
 	s.mu.RLock()
 	accountPool := s.accountPools[providerName]
 	s.mu.RUnlock()
@@ -854,10 +857,25 @@ func (s *Server) selectAvailableAccount(ctx context.Context, selector *pool.Weig
 		return nil, fmt.Errorf("no account pool for provider: %s", providerName)
 	}
 
-	maxTries := len(accountPool.List())
+	totalAccounts := len(accountPool.List())
+	maxTries := totalAccounts
 	if maxTries < 10 {
 		maxTries = 10
 	}
+
+	excludeSet := make(map[string]bool)
+	for _, id := range excludeAccounts {
+		excludeSet[id] = true
+	}
+
+	// If all accounts are excluded, no need to try
+	if len(excludeSet) >= totalAccounts {
+		return nil, fmt.Errorf("all accounts excluded for provider: %s", providerName)
+	}
+
+	// Track consecutive same account returns to detect infinite loop
+	lastAccountID := ""
+	consecutiveSameCount := 0
 
 	for i := 0; i < maxTries; i++ {
 		account, err := selector.Select(ctx, nil)
@@ -865,6 +883,22 @@ func (s *Server) selectAvailableAccount(ctx context.Context, selector *pool.Weig
 			return nil, fmt.Errorf("no available accounts for provider: %s", providerName)
 		}
 
+		if excludeSet[account.ID] {
+			// Detect if selector keeps returning the same excluded account
+			if account.ID == lastAccountID {
+				consecutiveSameCount++
+				if consecutiveSameCount > 3 {
+					// Selector is stuck, likely all non-excluded accounts have issues
+					return nil, fmt.Errorf("no available accounts (selector stuck) for provider: %s", providerName)
+				}
+			} else {
+				consecutiveSameCount = 1
+				lastAccountID = account.ID
+			}
+			continue
+		}
+
+		// Reset counters when we find a non-excluded account
 		s.mu.RLock()
 		cb, ok := s.circuitBreakers[account.ID]
 		s.mu.RUnlock()
@@ -1771,7 +1805,10 @@ func (s *Server) handleAdminBatchAccountOperation(c *gin.Context) {
 				if acc, err := p.Get(id); err == nil {
 					p.SetEnabled(id, true)
 					acc.IsEnabled = true
-					s.storage.UpsertAccount(c.Request.Context(), acc)
+					if err := s.storage.UpsertAccount(c.Request.Context(), acc); err != nil {
+						slog.Error("failed to upsert account during batch enable", "account_id", id, "error", err)
+						break
+					}
 					successCount++
 					break
 				}
@@ -1781,7 +1818,10 @@ func (s *Server) handleAdminBatchAccountOperation(c *gin.Context) {
 				if acc, err := p.Get(id); err == nil {
 					p.SetEnabled(id, false)
 					acc.IsEnabled = false
-					s.storage.UpsertAccount(c.Request.Context(), acc)
+					if err := s.storage.UpsertAccount(c.Request.Context(), acc); err != nil {
+						slog.Error("failed to upsert account during batch disable", "account_id", id, "error", err)
+						break
+					}
 					successCount++
 					break
 				}

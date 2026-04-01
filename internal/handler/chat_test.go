@@ -155,9 +155,12 @@ func setupTestHandler(backend *httptest.Server, accounts []*domain.Account, ml *
 
 	r := router.NewRouter([]provider.Provider{prov})
 
-	var compositeLimiter *limiter.CompositeLimiter
+	var limiters map[string]*limiter.CompositeLimiter
 	if ml != nil {
-		compositeLimiter = limiter.NewCompositeLimiter(ml)
+		limiters = make(map[string]*limiter.CompositeLimiter)
+		for _, acc := range accounts {
+			limiters[acc.ID] = limiter.NewCompositeLimiter(ml)
+		}
 	}
 
 	proxyCfg := &proxy.Config{
@@ -175,7 +178,7 @@ func setupTestHandler(backend *httptest.Server, accounts []*domain.Account, ml *
 		Pool:      p,
 		Router:    r,
 		Proxy:     px,
-		Limiter:   compositeLimiter,
+		Limiters:  limiters,
 		Collector: collector,
 		Logger:    logger,
 	}
@@ -660,11 +663,16 @@ func TestNewChatHandler_WithNilLogger(t *testing.T) {
 	px := proxy.NewProxy(nil)
 	collector := stats.NewCollector()
 
+	limiters := make(map[string]*limiter.CompositeLimiter)
+	for _, acc := range accounts {
+		limiters[acc.ID] = limiter.NewCompositeLimiter(ml)
+	}
+
 	cfg := &ChatConfig{
 		Pool:      p,
 		Router:    r,
 		Proxy:     px,
-		Limiter:   limiter.NewCompositeLimiter(ml),
+		Limiters:  limiters,
 		Collector: collector,
 		Logger:    nil,
 	}
