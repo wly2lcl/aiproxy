@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -57,6 +58,8 @@ type Server struct {
 	circuitBreakers     map[string]*resilience.CircuitBreaker
 	maxResponseBodySize int64
 	httpClient          *http.Client
+	shutdownChan        chan struct{}
+	mu                  sync.RWMutex
 }
 
 func main() {
@@ -168,6 +171,10 @@ func (s *Server) run(configPath string) error {
 	defer cancel()
 
 	slog.Info("shutting down server", "timeout", shutdownTimeout)
+
+	if s.shutdownChan != nil {
+		close(s.shutdownChan)
+	}
 
 	if err := publicServer.Shutdown(ctx); err != nil {
 		slog.Error("failed to shutdown server", "error", err)
@@ -405,16 +412,24 @@ func (s *Server) startCleanupTask() {
 		cleanupInterval = time.Hour
 	}
 
+	s.shutdownChan = make(chan struct{})
+
 	go func() {
 		ticker := time.NewTicker(cleanupInterval)
 		defer ticker.Stop()
 
 		slog.Info("started rate limit cleanup task", "interval", cleanupInterval)
 
-		for range ticker.C {
-			ctx := context.Background()
-			if err := s.storage.CleanupExpiredRateLimits(ctx); err != nil {
-				slog.Error("failed to cleanup expired rate limits", "error", err)
+		for {
+			select {
+			case <-s.shutdownChan:
+				slog.Info("stopping rate limit cleanup task")
+				return
+			case <-ticker.C:
+				ctx := context.Background()
+				if err := s.storage.CleanupExpiredRateLimits(ctx); err != nil {
+					slog.Error("failed to cleanup expired rate limits", "error", err)
+				}
 			}
 		}
 	}()
@@ -721,25 +736,18 @@ func (s *Server) handleWithProvider(c *gin.Context, req *openai.ChatCompletionRe
 }
 
 func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionRequest, prov provider.Provider, providerName string, startTime time.Time) (*http.Response, *domain.Account, error) {
+	s.mu.RLock()
 	selector, ok := s.selectors[providerName]
+	retry := s.retries[providerName]
+	s.mu.RUnlock()
+
 	if !ok {
 		return nil, nil, fmt.Errorf("no account pool for provider: %s", providerName)
 	}
 
-	account, err := s.selectAvailableAccount(selector, providerName)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	slog.Info("account selected", "account_id", account.ID[:8], "weight", account.Weight, "priority", account.Priority, "provider", providerName)
-
 	mappedModel := s.router.GetMappedModel(req.Model)
-	// 创建请求副本，使用 mappedModel 发送到上游
-	// 不直接修改 req.Model，避免 fallback 场景下污染原始请求
 	reqCopy := *req
 	reqCopy.Model = mappedModel
-
-	retry := s.retries[providerName]
 
 	var lastErr error
 
@@ -749,6 +757,17 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 	}
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		account, err := s.selectAvailableAccount(c.Request.Context(), selector, providerName)
+		if err != nil {
+			if attempt == 1 {
+				return nil, nil, err
+			}
+			lastErr = err
+			break
+		}
+
+		slog.Info("account selected", "account_id", account.ID[:8], "weight", account.Weight, "priority", account.Priority, "provider", providerName, "attempt", attempt)
+
 		if attempt > 1 {
 			// Use configured retry delay
 			delay := time.Second
@@ -810,7 +829,7 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			return nil, nil, fmt.Errorf("client error: %d", resp.StatusCode)
 		}
 
-		s.recordAccountSuccess(account.ID)
+		s.recordAccountSuccess(c.Request.Context(), account.ID)
 
 		// 成功：响应处理完成后再释放 context（流式需要读取 resp.Body）
 		if reqCopy.Stream {
@@ -826,20 +845,31 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 	return nil, nil, lastErr
 }
 
-func (s *Server) selectAvailableAccount(selector *pool.WeightedRoundRobin, providerName string) (*domain.Account, error) {
-	// 计算最大尝试次数，避免所有账号熔断时无限循环导致 goroutine 泄漏
-	maxTries := len(s.circuitBreakers)*2 + 1
+func (s *Server) selectAvailableAccount(ctx context.Context, selector *pool.WeightedRoundRobin, providerName string) (*domain.Account, error) {
+	s.mu.RLock()
+	accountPool := s.accountPools[providerName]
+	s.mu.RUnlock()
+
+	if accountPool == nil {
+		return nil, fmt.Errorf("no account pool for provider: %s", providerName)
+	}
+
+	maxTries := len(accountPool.List())
 	if maxTries < 10 {
 		maxTries = 10
 	}
 
 	for i := 0; i < maxTries; i++ {
-		account, err := selector.Select(context.Background(), nil)
+		account, err := selector.Select(ctx, nil)
 		if err != nil {
 			return nil, fmt.Errorf("no available accounts for provider: %s", providerName)
 		}
 
-		if cb, ok := s.circuitBreakers[account.ID]; ok {
+		s.mu.RLock()
+		cb, ok := s.circuitBreakers[account.ID]
+		s.mu.RUnlock()
+
+		if ok {
 			if !cb.Allow() {
 				slog.Warn("account circuit breaker open, skipping", "account_id", account.ID[:8])
 				continue
@@ -889,7 +919,7 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 	if found {
 		totalTokens = promptTokens + completionTokens
 		s.statsCollector.RecordRequest(providerName, req.Model, http.StatusOK, latency, totalTokens)
-		s.recordTokenUsage(account.ID, providerName, req.Model, promptTokens, completionTokens)
+		s.recordTokenUsage(c.Request.Context(), account.ID, providerName, req.Model, promptTokens, completionTokens)
 	} else {
 		s.statsCollector.RecordRequest(providerName, req.Model, http.StatusOK, latency, 0)
 	}
@@ -904,7 +934,7 @@ func (s *Server) handleStreamResponse(c *gin.Context, resp *http.Response, accou
 		reqBodyJSON, _ := json.Marshal(req)
 		reqBody = string(reqBodyJSON)
 	}
-	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, http.StatusOK, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", "", reqBody, respBody, req.Stream)
+	s.recordRequestLog(c.Request.Context(), c.GetString("request_id"), account.ID, providerName, req.Model, http.StatusOK, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", "", reqBody, respBody, req.Stream)
 
 	slog.Info("stream completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency)
 }
@@ -955,7 +985,7 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 	if err := json.Unmarshal(bodyBytes, &chatResp); err == nil && chatResp.Usage != nil {
 		totalTokens = chatResp.Usage.TotalTokens
 		s.statsCollector.RecordRequest(providerName, req.Model, resp.StatusCode, latency, totalTokens)
-		s.recordTokenUsage(account.ID, providerName, req.Model, chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens)
+		s.recordTokenUsage(c.Request.Context(), account.ID, providerName, req.Model, chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens)
 	} else {
 		s.statsCollector.RecordRequest(providerName, req.Model, resp.StatusCode, latency, 0)
 	}
@@ -974,7 +1004,7 @@ func (s *Server) handleNonStreamResponse(c *gin.Context, resp *http.Response, ac
 			respBody = respBody[:10000] + "...(truncated)"
 		}
 	}
-	s.recordRequestLog(c.GetString("request_id"), account.ID, providerName, req.Model, resp.StatusCode, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", "", reqBody, respBody, false)
+	s.recordRequestLog(c.Request.Context(), c.GetString("request_id"), account.ID, providerName, req.Model, resp.StatusCode, totalTokens, float64(ttft.Milliseconds()), float64(latency.Milliseconds()), "", "", reqBody, respBody, false)
 
 	slog.Info("request completed", "provider", providerName, "model", req.Model, "tokens", totalTokens, "ttft", ttft, "latency", latency, "status", resp.StatusCode)
 }
@@ -1010,32 +1040,41 @@ func (s *Server) forwardUpstreamError(c *gin.Context, resp *http.Response) {
 	})
 }
 
-func (s *Server) recordAccountSuccess(accountID string) {
-	for _, pool := range s.accountPools {
+func (s *Server) recordAccountSuccess(ctx context.Context, accountID string) {
+	s.mu.RLock()
+	pools := s.accountPools
+	cb, cbOk := s.circuitBreakers[accountID]
+	s.mu.RUnlock()
+
+	for _, pool := range pools {
 		pool.RecordSuccess(accountID)
 	}
-	if cb, ok := s.circuitBreakers[accountID]; ok {
+	if cbOk {
 		cb.RecordSuccess()
 	}
 	if s.storage != nil {
-		if err := s.storage.UpdateAccountLastUsed(context.Background(), accountID); err != nil {
+		if err := s.storage.UpdateAccountLastUsed(ctx, accountID); err != nil {
 			slog.Warn("failed to update account last used", "account_id", accountID, "error", err)
 		}
 	}
 }
 
 func (s *Server) recordAccountFailure(accountID string) {
-	for _, pool := range s.accountPools {
+	s.mu.RLock()
+	pools := s.accountPools
+	cb, cbOk := s.circuitBreakers[accountID]
+	s.mu.RUnlock()
+
+	for _, pool := range pools {
 		pool.RecordFailure(accountID)
 	}
-	if cb, ok := s.circuitBreakers[accountID]; ok {
+	if cbOk {
 		cb.RecordFailure()
 	}
 }
 
-func (s *Server) recordTokenUsage(accountID, providerID, model string, promptTokens, completionTokens int) {
+func (s *Server) recordTokenUsage(ctx context.Context, accountID, providerID, model string, promptTokens, completionTokens int) {
 	if s.storage != nil && promptTokens > 0 {
-		ctx := context.Background()
 		usage := &storage.TokenUsage{
 			RequestID:        utils.GenerateUUID(),
 			AccountID:        accountID,
@@ -1053,7 +1092,7 @@ func (s *Server) recordTokenUsage(accountID, providerID, model string, promptTok
 	}
 }
 
-func (s *Server) recordRequestLog(requestID, accountID, providerID, model string, status, tokens int, ttftMs, latencyMs float64, errorType, errorMsg, requestBody, responseBody string, isStreaming bool) {
+func (s *Server) recordRequestLog(ctx context.Context, requestID, accountID, providerID, model string, status, tokens int, ttftMs, latencyMs float64, errorType, errorMsg, requestBody, responseBody string, isStreaming bool) {
 	if s.storage == nil {
 		return
 	}
@@ -1076,7 +1115,7 @@ func (s *Server) recordRequestLog(requestID, accountID, providerID, model string
 		RequestBody:  requestBody,
 		ResponseBody: responseBody,
 	}
-	if err := s.storage.RecordRequestLog(context.Background(), log); err != nil {
+	if err := s.storage.RecordRequestLog(ctx, log); err != nil {
 		slog.Warn("failed to record request log", "error", err)
 	}
 }
@@ -1345,8 +1384,14 @@ func (s *Server) handleAdminStatsFromDB(c *gin.Context) {
 		return
 	}
 
-	modelStats, _ := s.storage.GetModelStats(c.Request.Context(), since)
-	latencyData, _ := s.storage.GetLatencyData(c.Request.Context(), since)
+	modelStats, err := s.storage.GetModelStats(c.Request.Context(), since)
+	if err != nil {
+		slog.Warn("failed to get model stats", "error", err)
+	}
+	latencyData, err := s.storage.GetLatencyData(c.Request.Context(), since)
+	if err != nil {
+		slog.Warn("failed to get latency data", "error", err)
+	}
 
 	var totalRequests, totalTokens, totalErrors int64
 	requestsByModel := make(map[string]int64)
@@ -1468,15 +1513,51 @@ func (s *Server) handleAdminReload(c *gin.Context) {
 		return
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	oldConfig := s.config
 	s.config = cfg
+
+	oldAccountPools := s.accountPools
+	oldSelectors := s.selectors
+	oldCircuitBreakers := s.circuitBreakers
+	oldLimiters := s.limiters
+	oldRetries := s.retries
 
 	s.accountPools = make(map[string]*pool.Pool)
 	s.selectors = make(map[string]*pool.WeightedRoundRobin)
 	s.limiters = make(map[string]*limiter.CompositeLimiter)
+	s.circuitBreakers = make(map[string]*resilience.CircuitBreaker)
+	s.retries = make(map[string]*resilience.Retry)
 
 	if err := s.initProviders(); err != nil {
+		s.config = oldConfig
+		s.accountPools = oldAccountPools
+		s.selectors = oldSelectors
+		s.circuitBreakers = oldCircuitBreakers
+		s.limiters = oldLimiters
+		s.retries = oldRetries
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to reinitialize providers: %v", err)})
 		return
+	}
+
+	for id, cb := range oldCircuitBreakers {
+		if _, exists := s.circuitBreakers[id]; !exists {
+			s.circuitBreakers[id] = cb
+		}
+	}
+
+	for id, lim := range oldLimiters {
+		if _, exists := s.limiters[id]; !exists {
+			s.limiters[id] = lim
+		}
+	}
+
+	for id, r := range oldRetries {
+		if _, exists := s.retries[id]; !exists {
+			s.retries[id] = r
+		}
 	}
 
 	slog.Info("configuration reloaded successfully")
@@ -1891,7 +1972,10 @@ func (s *Server) handleAdminExport(c *gin.Context) {
 		c.Header("Content-Disposition", "attachment; filename=stats.csv")
 		c.Header("Content-Type", "text/csv")
 		c.Writer.WriteString("timestamp,total_requests,total_tokens,total_errors\n")
-		points, _ := s.storage.GetRequestTimeSeries(c.Request.Context(), time.Now().Add(-24*time.Hour), "hour")
+		points, err := s.storage.GetRequestTimeSeries(c.Request.Context(), time.Now().Add(-24*time.Hour), "hour")
+		if err != nil {
+			slog.Warn("failed to get time series data", "error", err)
+		}
 		for _, p := range points {
 			c.Writer.WriteString(fmt.Sprintf("%s,%d,%d,%d\n", p.Timestamp.Format("2006-01-02 15:04"), p.Count, p.Tokens, p.Errors))
 		}

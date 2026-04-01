@@ -39,12 +39,7 @@ func (d *Daily) Allow(ctx context.Context, key string) (bool, error) {
 		d.windows[key] = windowStart
 	}
 
-	if d.counts[key] >= d.max {
-		return false, nil
-	}
-
-	d.counts[key]++
-	return true, nil
+	return d.counts[key] < d.max, nil
 }
 
 func (d *Daily) Record(ctx context.Context, key string, delta int) error {

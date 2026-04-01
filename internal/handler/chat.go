@@ -43,9 +43,11 @@ type ChatHandler struct {
 	maxResponseBodySize int64
 }
 
-func NewChatHandler(cfg *ChatConfig) *ChatHandler {
+var ErrChatConfigRequired = domain.NewDomainError("chat_config_required", "chat config is required")
+
+func NewChatHandler(cfg *ChatConfig) (*ChatHandler, error) {
 	if cfg == nil {
-		panic("chat config is required")
+		return nil, ErrChatConfigRequired
 	}
 
 	var selector *pool.WeightedRoundRobin
@@ -67,7 +69,7 @@ func NewChatHandler(cfg *ChatConfig) *ChatHandler {
 		logger:              cfg.Logger,
 		selector:            selector,
 		maxResponseBodySize: maxResponseBodySize,
-	}
+	}, nil
 }
 
 func (h *ChatHandler) Handle(c *gin.Context) {

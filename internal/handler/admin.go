@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
@@ -60,7 +61,7 @@ func (h *AdminHandler) Auth() gin.HandlerFunc {
 			return
 		}
 
-		if !h.apiKeys[key] {
+		if !h.validateAdminKey(key) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin key"})
 			c.Abort()
 			return
@@ -68,6 +69,15 @@ func (h *AdminHandler) Auth() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func (h *AdminHandler) validateAdminKey(key string) bool {
+	for storedKey := range h.apiKeys {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(storedKey)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 type AccountResponse struct {

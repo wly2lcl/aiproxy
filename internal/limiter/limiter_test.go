@@ -260,6 +260,7 @@ func TestRPM_Allow_OverLimit(t *testing.T) {
 		if !allowed {
 			t.Errorf("expected allowed at iteration %d", i)
 		}
+		limiter.Record(ctx, key, 1)
 	}
 
 	allowed, err := limiter.Allow(ctx, key)
@@ -281,16 +282,19 @@ func TestRPM_SlidingWindow(t *testing.T) {
 	if !allowed {
 		t.Error("expected first request allowed")
 	}
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ = limiter.Allow(ctx, key)
 	if !allowed {
 		t.Error("expected second request allowed")
 	}
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ = limiter.Allow(ctx, key)
 	if !allowed {
 		t.Error("expected third request allowed")
 	}
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ = limiter.Allow(ctx, key)
 	if allowed {
@@ -305,7 +309,9 @@ func TestRPM_Expiry(t *testing.T) {
 	key := "test-account"
 
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ := limiter.Allow(ctx, key)
 	if allowed {
@@ -336,7 +342,9 @@ func TestRPM_Reset(t *testing.T) {
 	key := "test-account"
 
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ := limiter.Allow(ctx, key)
 	if allowed {
@@ -368,6 +376,7 @@ func TestDaily_Allow_UnderLimit(t *testing.T) {
 		if !allowed {
 			t.Errorf("expected allowed at iteration %d", i)
 		}
+		limiter.Record(ctx, key, 1)
 	}
 }
 
@@ -382,6 +391,7 @@ func TestDaily_Allow_OverLimit(t *testing.T) {
 		if !allowed {
 			t.Errorf("expected allowed at iteration %d", i)
 		}
+		limiter.Record(ctx, key, 1)
 	}
 
 	allowed, _ := limiter.Allow(ctx, key)
@@ -397,7 +407,9 @@ func TestDaily_ResetAtMidnight(t *testing.T) {
 	key := "test-account"
 
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ := limiter.Allow(ctx, key)
 	if allowed {
@@ -430,6 +442,7 @@ func TestWindow_Allow_UnderLimit(t *testing.T) {
 		if !allowed {
 			t.Errorf("expected allowed at iteration %d", i)
 		}
+		limiter.Record(ctx, key, 1)
 	}
 }
 
@@ -440,7 +453,9 @@ func TestWindow_5HourRolling(t *testing.T) {
 	key := "test-account"
 
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ := limiter.Allow(ctx, key)
 	if allowed {
@@ -477,6 +492,7 @@ func TestMonthly_Allow_UnderLimit(t *testing.T) {
 		if !allowed {
 			t.Errorf("expected allowed at iteration %d", i)
 		}
+		limiter.Record(ctx, key, 1)
 	}
 }
 
@@ -487,7 +503,9 @@ func TestMonthly_FirstOfMonth(t *testing.T) {
 	key := "test-account"
 
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 	limiter.Allow(ctx, key)
+	limiter.Record(ctx, key, 1)
 
 	allowed, _ := limiter.Allow(ctx, key)
 	if allowed {
@@ -613,6 +631,7 @@ func TestCompositeLimiter_AllLimits(t *testing.T) {
 		if !allowed {
 			t.Errorf("expected allowed at iteration %d", i)
 		}
+		composite.Record(ctx, key, 1)
 	}
 
 	allowed, _ := composite.Allow(ctx, key)
@@ -631,7 +650,9 @@ func TestCompositeLimiter_GetStates(t *testing.T) {
 	key := "test-account"
 
 	composite.Allow(ctx, key)
+	composite.Record(ctx, key, 1)
 	composite.Allow(ctx, key)
+	composite.Record(ctx, key, 1)
 
 	states, err := composite.GetStates(ctx, key)
 	if err != nil {

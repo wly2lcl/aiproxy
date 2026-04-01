@@ -180,7 +180,10 @@ func setupTestHandler(backend *httptest.Server, accounts []*domain.Account, ml *
 		Logger:    logger,
 	}
 
-	handler := NewChatHandler(cfg)
+	handler, err := NewChatHandler(cfg)
+	if err != nil {
+		panic("failed to create handler: " + err.Error())
+	}
 
 	engine := gin.New()
 	engine.POST("/v1/chat/completions", handler.Handle)
@@ -632,13 +635,13 @@ func TestChatHandler_Handle_MultipleAccounts(t *testing.T) {
 }
 
 func TestNewChatHandler_NilConfig(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for nil config")
-		}
-	}()
-
-	NewChatHandler(nil)
+	handler, err := NewChatHandler(nil)
+	if err == nil {
+		t.Error("expected error for nil config")
+	}
+	if handler != nil {
+		t.Error("expected nil handler for nil config")
+	}
 }
 
 func TestNewChatHandler_WithNilLogger(t *testing.T) {
@@ -666,7 +669,10 @@ func TestNewChatHandler_WithNilLogger(t *testing.T) {
 		Logger:    nil,
 	}
 
-	handler := NewChatHandler(cfg)
+	handler, err := NewChatHandler(cfg)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
 	if handler == nil {
 		t.Error("expected handler to be created")
 	}

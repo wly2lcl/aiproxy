@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -69,6 +70,15 @@ func NewAuthConfig() *AuthConfig {
 		AuthFailureWindow:    15 * time.Minute,
 		AuthFailureBlockTime: 30 * time.Minute,
 	}
+}
+
+func (cfg *AuthConfig) validateStaticKey(key string) bool {
+	for storedKey := range cfg.APIKeys {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(storedKey)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *authFailureTracker) RecordFailure(ip string, window time.Duration) {
@@ -267,13 +277,14 @@ func Auth(cfg *AuthConfig) gin.HandlerFunc {
 
 		key := strings.TrimPrefix(authHeader, cfg.KeyPrefix)
 
-		if cfg.APIKeys[key] {
+		// Use constant-time comparison for static API keys to prevent timing attacks
+		if cfg.validateStaticKey(key) {
 			globalAuthTracker.ClearBlock(clientIP)
 			if cfg.SecurityStore != nil {
 				cfg.SecurityStore.UnblockIP(c.Request.Context(), clientIP)
 				cfg.SecurityStore.ClearAuthFailure(c.Request.Context(), clientIP)
 			}
-			c.Set("api_key", key)
+			c.Set("api_key_hash", utils.HashAPIKey(key))
 			c.Next()
 			return
 		}
@@ -287,7 +298,6 @@ func Auth(cfg *AuthConfig) gin.HandlerFunc {
 					cfg.SecurityStore.UnblockIP(c.Request.Context(), clientIP)
 					cfg.SecurityStore.ClearAuthFailure(c.Request.Context(), clientIP)
 				}
-				c.Set("api_key", key)
 				c.Set("api_key_id", apiKey.ID)
 				c.Set("api_key_name", apiKey.Name)
 				c.Set("api_key_hash", keyHash)

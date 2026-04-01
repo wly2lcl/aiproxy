@@ -39,12 +39,7 @@ func (m *Monthly) Allow(ctx context.Context, key string) (bool, error) {
 		m.windows[key] = windowStart
 	}
 
-	if m.counts[key] >= m.max {
-		return false, nil
-	}
-
-	m.counts[key]++
-	return true, nil
+	return m.counts[key] < m.max, nil
 }
 
 func (m *Monthly) Record(ctx context.Context, key string, delta int) error {
