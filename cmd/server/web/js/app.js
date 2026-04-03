@@ -136,7 +136,14 @@ const app = Vue.createApp({
     async fetchVersion() { try { const d = await this.apiCall('/admin/version'); this.version = d } catch (e) {} },
     async fetchModelMapping() { try { const d = await this.apiCall('/admin/model-mapping'); this.modelMapping = d.model_mapping || {} } catch (e) {} },
     async fetchTimeSeries() {
-      try { const d = await this.apiCall(`/admin/stats/timeseries?hours=${this.timeSeriesRange}`); this.timeSeries = d.timeseries || [] }
+      try {
+        const d = await this.apiCall(`/admin/stats/timeseries?hours=${this.timeSeriesRange}`)
+        this.timeSeries = d.timeseries || []
+        // Re-render chart when data is updated
+        if (this.currentView === 'stats') {
+          this.$nextTick(() => this.initTrendChart())
+        }
+      }
       catch (e) {}
     },
     async fetchAccountStats() {
@@ -245,7 +252,16 @@ const app = Vue.createApp({
       if (this.charts.trend) this.charts.trend.destroy()
       const ctx = document.getElementById('trendChart')
       if (!ctx || !this.timeSeries.length) return
-      const labels = this.timeSeries.map(p => p.Timestamp ? new Date(p.Timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '')
+      
+      const hours = parseInt(this.timeSeriesRange) || 24
+      const labels = this.timeSeries.map(p => {
+        if (!p.Timestamp) return ''
+        const date = new Date(p.Timestamp)
+        if (hours > 24) {
+          return date.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' ' + date.toLocaleTimeString([], {hour: '2-digit'})
+        }
+        return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
+      })
       this.charts.trend = new Chart(ctx, {
         type: 'line',
         data: {
