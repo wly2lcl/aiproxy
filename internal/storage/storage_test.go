@@ -127,7 +127,7 @@ func TestSQLite_UpsertAccount(t *testing.T) {
 	account := &domain.Account{
 		ID:         "test-account",
 		ProviderID: "test-provider",
-		APIKeyHash: "hash123",
+		APIKey: "hash123",
 		Weight:     1,
 		Priority:   0,
 		IsEnabled:  true,
@@ -149,8 +149,8 @@ func TestSQLite_UpsertAccount(t *testing.T) {
 	if retrieved.ProviderID != account.ProviderID {
 		t.Errorf("expected ProviderID %s, got %s", account.ProviderID, retrieved.ProviderID)
 	}
-	if retrieved.APIKeyHash != account.APIKeyHash {
-		t.Errorf("expected APIKeyHash %s, got %s", account.APIKeyHash, retrieved.APIKeyHash)
+	if retrieved.APIKey != account.APIKey {
+		t.Errorf("expected APIKey %s, got %s", account.APIKey, retrieved.APIKey)
 	}
 
 	account.Weight = 2
@@ -204,9 +204,9 @@ func TestSQLite_ListAccounts(t *testing.T) {
 	}
 
 	accounts := []*domain.Account{
-		{ID: "account1", ProviderID: "test-provider", APIKeyHash: "hash1", Weight: 1, Priority: 0, IsEnabled: true},
-		{ID: "account2", ProviderID: "test-provider", APIKeyHash: "hash2", Weight: 2, Priority: 1, IsEnabled: true},
-		{ID: "account3", ProviderID: "test-provider", APIKeyHash: "hash3", Weight: 1, Priority: 0, IsEnabled: false},
+		{ID: "account1", ProviderID: "test-provider", APIKey: "hash1", Weight: 1, Priority: 0, IsEnabled: true},
+		{ID: "account2", ProviderID: "test-provider", APIKey: "hash2", Weight: 2, Priority: 1, IsEnabled: true},
+		{ID: "account3", ProviderID: "test-provider", APIKey: "hash3", Weight: 1, Priority: 0, IsEnabled: false},
 	}
 
 	for _, a := range accounts {
@@ -516,7 +516,7 @@ func TestSQLite_ConcurrentWrites(t *testing.T) {
 	account := &domain.Account{
 		ID:         "test-account",
 		ProviderID: "test-provider",
-		APIKeyHash: "hash123",
+		APIKey: "hash123",
 		Weight:     1,
 		Priority:   0,
 		IsEnabled:  true,
@@ -614,7 +614,7 @@ func setupTestAccount(t *testing.T, db *SQLite, ctx context.Context) *domain.Acc
 	account := &domain.Account{
 		ID:         "test-account",
 		ProviderID: "test-provider",
-		APIKeyHash: "hash123",
+		APIKey: "hash123",
 		Weight:     1,
 		Priority:   0,
 		IsEnabled:  true,

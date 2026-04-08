@@ -125,7 +125,7 @@ func (p *Proxy) ModifyRequest(r *http.Request, account *domain.Account, prov pro
 
 	apiKey := ""
 	if account != nil {
-		apiKey = account.APIKeyHash
+		apiKey = account.APIKey
 	}
 
 	headers := prov.GetHeaders(apiKey)

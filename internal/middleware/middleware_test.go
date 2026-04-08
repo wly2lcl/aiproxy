@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wangluyao/aiproxy/internal/domain"
@@ -330,6 +331,14 @@ func (m *mockLimiter) Reset(ctx context.Context, key string) error {
 
 func (m *mockLimiter) LimitType() domain.LimitType {
 	return domain.LimitTypeRPM
+}
+
+func (m *mockLimiter) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	return nil
+}
+
+func (m *mockLimiter) CleanupStale(maxAge time.Duration) int {
+	return 0
 }
 
 func TestRateLimit_Allow(t *testing.T) {

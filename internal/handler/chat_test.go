@@ -131,11 +131,19 @@ func (m *mockLimiter) LimitType() domain.LimitType {
 	return domain.LimitTypeRPM
 }
 
+func (m *mockLimiter) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	return nil
+}
+
+func (m *mockLimiter) CleanupStale(maxAge time.Duration) int {
+	return 0
+}
+
 func createTestAccount(id string, weight int, enabled bool) *domain.Account {
 	return &domain.Account{
 		ID:         id,
 		ProviderID: "test-provider",
-		APIKeyHash: "test-key-" + id,
+		APIKey: "test-key-" + id,
 		Weight:     weight,
 		Priority:   0,
 		IsEnabled:  enabled,

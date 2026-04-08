@@ -10,11 +10,12 @@ import (
 )
 
 type Window5h struct {
-	store    storage.Storage
-	max      int
-	mu       sync.RWMutex
-	windows  map[string]*rollingWindow
-	windowSz time.Duration
+	store      storage.Storage
+	max        int
+	mu         sync.RWMutex
+	windows    map[string]*rollingWindow
+	windowSz   time.Duration
+	lastAccess map[string]time.Time
 }
 
 type rollingWindow struct {
@@ -24,10 +25,11 @@ type rollingWindow struct {
 
 func NewWindow5h(store storage.Storage, max int) *Window5h {
 	return &Window5h{
-		store:    store,
-		max:      max,
-		windows:  make(map[string]*rollingWindow),
-		windowSz: 5 * time.Hour,
+		store:      store,
+		max:        max,
+		windows:    make(map[string]*rollingWindow),
+		windowSz:   5 * time.Hour,
+		lastAccess: make(map[string]time.Time),
 	}
 }
 
@@ -36,10 +38,11 @@ func NewWindow5hWithDuration(store storage.Storage, max int, windowDuration time
 		windowDuration = 5 * time.Hour
 	}
 	return &Window5h{
-		store:    store,
-		max:      max,
-		windows:  make(map[string]*rollingWindow),
-		windowSz: windowDuration,
+		store:      store,
+		max:        max,
+		windows:    make(map[string]*rollingWindow),
+		windowSz:   windowDuration,
+		lastAccess: make(map[string]time.Time),
 	}
 }
 
@@ -49,6 +52,9 @@ func (w *Window5h) Allow(ctx context.Context, key string) (bool, error) {
 
 	now := time.Now().UTC()
 	windowStart := now.Add(-w.windowSz)
+
+	// Track last access
+	w.lastAccess[key] = now
 
 	rw, exists := w.windows[key]
 	if !exists {
@@ -70,6 +76,9 @@ func (w *Window5h) Record(ctx context.Context, key string, delta int) error {
 	defer w.mu.Unlock()
 
 	now := time.Now().UTC()
+
+	// Track last access
+	w.lastAccess[key] = now
 
 	rw, exists := w.windows[key]
 	if !exists {
@@ -148,4 +157,54 @@ func (w *Window5h) pruneWindow(rw *rollingWindow, windowStart time.Time) {
 	}
 	rw.counts = rw.counts[:validIdx]
 	rw.timestamps = rw.timestamps[:validIdx]
+}
+
+// LoadState loads persisted state from database into memory
+// For sliding window, we can only restore the count, not the timestamps
+func (w *Window5h) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	if state == nil || state.Current <= 0 {
+		return nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	now := time.Now().UTC()
+
+	// Only load state if it's from within the window
+	if state.WindowStart.After(now.Add(-w.windowSz)) {
+		rw := &rollingWindow{
+			counts:     make([]int, 0),
+			timestamps: make([]time.Time, 0),
+		}
+
+		// Distribute the count across the window as a single entry
+		// This is an approximation for sliding window
+		rw.counts = append(rw.counts, state.Current)
+		rw.timestamps = append(rw.timestamps, state.WindowStart.Add(w.windowSz/2))
+		w.windows[key] = rw
+		w.lastAccess[key] = now
+	}
+
+	return nil
+}
+
+// CleanupStale removes entries that haven't been accessed for more than maxAge
+func (w *Window5h) CleanupStale(maxAge time.Duration) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-maxAge)
+	removed := 0
+
+	for key, lastAccess := range w.lastAccess {
+		if lastAccess.Before(cutoff) {
+			delete(w.windows, key)
+			delete(w.lastAccess, key)
+			removed++
+		}
+	}
+
+	return removed
 }

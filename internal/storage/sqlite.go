@@ -185,7 +185,7 @@ func (s *SQLite) UpsertAccount(ctx context.Context, account *domain.Account) err
 	_, err := s.db.ExecContext(ctx, upsertAccountQuery,
 		sql.Named("id", account.ID),
 		sql.Named("provider_id", account.ProviderID),
-		sql.Named("api_key_hash", account.APIKeyHash),
+		sql.Named("api_key_hash", account.APIKey),
 		sql.Named("weight", account.Weight),
 		sql.Named("is_enabled", account.IsEnabled),
 		sql.Named("priority", account.Priority),
@@ -209,7 +209,7 @@ func (s *SQLite) GetAccount(ctx context.Context, id string) (*domain.Account, er
 	err := s.db.QueryRowContext(ctx, getAccountQuery, id).Scan(
 		&account.ID,
 		&account.ProviderID,
-		&account.APIKeyHash,
+		&account.APIKey,
 		&account.Weight,
 		&account.IsEnabled,
 		&account.Priority,
@@ -246,7 +246,7 @@ func (s *SQLite) ListAccounts(ctx context.Context, providerID string) ([]*domain
 		err := rows.Scan(
 			&account.ID,
 			&account.ProviderID,
-			&account.APIKeyHash,
+			&account.APIKey,
 			&account.Weight,
 			&account.IsEnabled,
 			&account.Priority,

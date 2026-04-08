@@ -153,7 +153,7 @@ func (h *ChatHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	upstreamReq, err := prov.TransformRequest(&req, account.APIKeyHash)
+	upstreamReq, err := prov.TransformRequest(&req, account.APIKey)
 	if err != nil {
 		h.sendError(c, http.StatusInternalServerError, "transform_error", "failed to transform request")
 		return

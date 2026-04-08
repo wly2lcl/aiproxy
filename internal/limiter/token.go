@@ -12,14 +12,15 @@ import (
 const charsPerToken = 4
 
 type Token struct {
-	store     storage.Storage
-	max       int
-	limitType domain.LimitType
-	mu        sync.RWMutex
-	usage     map[string]*tokenUsage
-	windows   map[string]time.Time
-	windowSz  time.Duration
-	isMonthly bool
+	store      storage.Storage
+	max        int
+	limitType  domain.LimitType
+	mu         sync.RWMutex
+	usage      map[string]*tokenUsage
+	windows    map[string]time.Time
+	windowSz   time.Duration
+	isMonthly  bool
+	lastAccess map[string]time.Time
 }
 
 type tokenUsage struct {
@@ -30,25 +31,27 @@ type tokenUsage struct {
 
 func NewTokenDaily(store storage.Storage, max int) *Token {
 	return &Token{
-		store:     store,
-		max:       max,
-		limitType: domain.LimitTypeTokenDaily,
-		usage:     make(map[string]*tokenUsage),
-		windows:   make(map[string]time.Time),
-		windowSz:  24 * time.Hour,
-		isMonthly: false,
+		store:      store,
+		max:        max,
+		limitType:  domain.LimitTypeTokenDaily,
+		usage:      make(map[string]*tokenUsage),
+		windows:    make(map[string]time.Time),
+		windowSz:   24 * time.Hour,
+		isMonthly:  false,
+		lastAccess: make(map[string]time.Time),
 	}
 }
 
 func NewTokenMonthly(store storage.Storage, max int) *Token {
 	return &Token{
-		store:     store,
-		max:       max,
-		limitType: domain.LimitTypeTokenMonthly,
-		usage:     make(map[string]*tokenUsage),
-		windows:   make(map[string]time.Time),
-		windowSz:  0,
-		isMonthly: true,
+		store:      store,
+		max:        max,
+		limitType:  domain.LimitTypeTokenMonthly,
+		usage:      make(map[string]*tokenUsage),
+		windows:    make(map[string]time.Time),
+		windowSz:   0,
+		isMonthly:  true,
+		lastAccess: make(map[string]time.Time),
 	}
 }
 
@@ -58,6 +61,9 @@ func (t *Token) Allow(ctx context.Context, key string) (bool, error) {
 
 	now := time.Now().UTC()
 	windowStart := t.getWindowStart(now)
+
+	// Track last access
+	t.lastAccess[key] = now
 
 	currentWindow, exists := t.windows[key]
 	if !exists || !currentWindow.Equal(windowStart) {
@@ -80,6 +86,9 @@ func (t *Token) Record(ctx context.Context, key string, delta int) error {
 
 	now := time.Now().UTC()
 	windowStart := t.getWindowStart(now)
+
+	// Track last access
+	t.lastAccess[key] = now
 
 	currentWindow, exists := t.windows[key]
 	if !exists || !currentWindow.Equal(windowStart) {
@@ -217,4 +226,49 @@ func (t *Token) getWindowEnd(now time.Time) time.Time {
 		return time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 	}
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
+}
+
+// LoadState loads persisted state from database into memory
+func (t *Token) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	if state == nil || state.Current <= 0 {
+		return nil
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now().UTC()
+	windowStart := t.getWindowStart(now)
+
+	// Only load state if it's from the current window
+	if state.WindowStart.Equal(windowStart) {
+		t.usage[key] = &tokenUsage{
+			completionTokens: state.Current,
+		}
+		t.windows[key] = windowStart
+		t.lastAccess[key] = now
+	}
+
+	return nil
+}
+
+// CleanupStale removes entries that haven't been accessed for more than maxAge
+func (t *Token) CleanupStale(maxAge time.Duration) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-maxAge)
+	removed := 0
+
+	for key, lastAccess := range t.lastAccess {
+		if lastAccess.Before(cutoff) {
+			delete(t.usage, key)
+			delete(t.windows, key)
+			delete(t.lastAccess, key)
+			removed++
+		}
+	}
+
+	return removed
 }

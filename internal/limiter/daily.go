@@ -10,19 +10,21 @@ import (
 )
 
 type Daily struct {
-	store   storage.Storage
-	max     int
-	mu      sync.RWMutex
-	counts  map[string]int
-	windows map[string]time.Time
+	store      storage.Storage
+	max        int
+	mu         sync.RWMutex
+	counts     map[string]int
+	windows    map[string]time.Time
+	lastAccess map[string]time.Time
 }
 
 func NewDaily(store storage.Storage, max int) *Daily {
 	return &Daily{
-		store:   store,
-		max:     max,
-		counts:  make(map[string]int),
-		windows: make(map[string]time.Time),
+		store:      store,
+		max:        max,
+		counts:     make(map[string]int),
+		windows:    make(map[string]time.Time),
+		lastAccess: make(map[string]time.Time),
 	}
 }
 
@@ -32,6 +34,9 @@ func (d *Daily) Allow(ctx context.Context, key string) (bool, error) {
 
 	now := time.Now().UTC()
 	windowStart := d.getWindowStart(now)
+
+	// Track last access
+	d.lastAccess[key] = now
 
 	currentWindow, exists := d.windows[key]
 	if !exists || !currentWindow.Equal(windowStart) {
@@ -48,6 +53,9 @@ func (d *Daily) Record(ctx context.Context, key string, delta int) error {
 
 	now := time.Now().UTC()
 	windowStart := d.getWindowStart(now)
+
+	// Track last access
+	d.lastAccess[key] = now
 
 	currentWindow, exists := d.windows[key]
 	if !exists || !currentWindow.Equal(windowStart) {
@@ -97,4 +105,47 @@ func (d *Daily) LimitType() domain.LimitType {
 
 func (d *Daily) getWindowStart(now time.Time) time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// LoadState loads persisted state from database into memory
+func (d *Daily) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	if state == nil || state.Current <= 0 {
+		return nil
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := time.Now().UTC()
+	windowStart := d.getWindowStart(now)
+
+	// Only load state if it's from the current day
+	if state.WindowStart.Equal(windowStart) {
+		d.counts[key] = state.Current
+		d.windows[key] = windowStart
+		d.lastAccess[key] = now
+	}
+
+	return nil
+}
+
+// CleanupStale removes entries that haven't been accessed for more than maxAge
+func (d *Daily) CleanupStale(maxAge time.Duration) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-maxAge)
+	removed := 0
+
+	for key, lastAccess := range d.lastAccess {
+		if lastAccess.Before(cutoff) {
+			delete(d.counts, key)
+			delete(d.windows, key)
+			delete(d.lastAccess, key)
+			removed++
+		}
+	}
+
+	return removed
 }

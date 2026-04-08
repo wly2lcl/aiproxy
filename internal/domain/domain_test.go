@@ -16,7 +16,7 @@ func TestAccount_Validate(t *testing.T) {
 			account: Account{
 				ID:         "acc-123",
 				ProviderID: "provider-1",
-				APIKeyHash: "hash123",
+				APIKey: "hash123",
 				Weight:     10,
 				Priority:   1,
 				IsEnabled:  true,
@@ -27,7 +27,7 @@ func TestAccount_Validate(t *testing.T) {
 			name: "missing id",
 			account: Account{
 				ProviderID: "provider-1",
-				APIKeyHash: "hash123",
+				APIKey: "hash123",
 			},
 			wantErr: true,
 		},
@@ -35,7 +35,7 @@ func TestAccount_Validate(t *testing.T) {
 			name: "missing provider id",
 			account: Account{
 				ID:         "acc-123",
-				APIKeyHash: "hash123",
+				APIKey: "hash123",
 			},
 			wantErr: true,
 		},
@@ -52,7 +52,7 @@ func TestAccount_Validate(t *testing.T) {
 			account: Account{
 				ID:         "acc-123",
 				ProviderID: "provider-1",
-				APIKeyHash: "hash123",
+				APIKey: "hash123",
 				Weight:     -1,
 			},
 			wantErr: true,
@@ -62,7 +62,7 @@ func TestAccount_Validate(t *testing.T) {
 			account: Account{
 				ID:         "acc-123",
 				ProviderID: "provider-1",
-				APIKeyHash: "hash123",
+				APIKey: "hash123",
 				Priority:   -1,
 			},
 			wantErr: true,
@@ -72,7 +72,7 @@ func TestAccount_Validate(t *testing.T) {
 			account: Account{
 				ID:         "acc-123",
 				ProviderID: "provider-1",
-				APIKeyHash: "hash123",
+				APIKey: "hash123",
 				Weight:     0,
 				Priority:   0,
 			},
@@ -459,7 +459,7 @@ func TestAccountStateWithLimits(t *testing.T) {
 	account := Account{
 		ID:         "acc-123",
 		ProviderID: "provider-1",
-		APIKeyHash: "hash123",
+		APIKey: "hash123",
 		Weight:     10,
 		Priority:   1,
 		IsEnabled:  true,

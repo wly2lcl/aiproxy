@@ -398,6 +398,27 @@ curl -X POST http://localhost:8080/admin/reload \
 | `token_daily` | 每日 Token 数 | UTC 午夜重置 |
 | `token_monthly` | 每月 Token 数 | UTC 每月 1 日重置 |
 
+### 状态持久化
+
+服务重启后，限流状态会自动从数据库恢复：
+
+- **Daily/Monthly/Token**：精确恢复当前计数
+- **RPM/Window**：近似恢复（滑动窗口无法精确恢复时间戳）
+
+### 内存清理
+
+定期清理不活跃的限流条目，防止内存无限增长：
+
+```json
+"rate_limits": {
+  "cleanup_interval": "1h",
+  "window_5h_duration": "5h"
+}
+```
+
+- `cleanup_interval`：清理任务执行间隔，默认 1 小时
+- 超过 1 小时未访问的账户条目会被清理
+
 ## 弹性机制
 
 ### 自动重试

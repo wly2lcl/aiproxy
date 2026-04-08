@@ -293,7 +293,7 @@ func (h *AdminHandler) AddAccount(c *gin.Context) {
 	account := &domain.Account{
 		ID:         req.ID,
 		ProviderID: req.ProviderID,
-		APIKeyHash: utils.HashAPIKey(req.APIKey),
+		APIKey:     req.APIKey, // Store raw key for upstream API calls
 		Weight:     req.Weight,
 		Priority:   req.Priority,
 		IsEnabled:  req.Enabled,

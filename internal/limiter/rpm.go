@@ -15,6 +15,8 @@ type RPM struct {
 	mu       sync.RWMutex
 	windows  map[string]*slidingWindow
 	windowSz time.Duration
+	// Track last access time for cleanup
+	lastAccess map[string]time.Time
 }
 
 type slidingWindow struct {
@@ -25,10 +27,11 @@ type slidingWindow struct {
 
 func NewRPM(store storage.Storage, max int) *RPM {
 	return &RPM{
-		store:    store,
-		max:      max,
-		windows:  make(map[string]*slidingWindow),
-		windowSz: time.Minute,
+		store:      store,
+		max:        max,
+		windows:    make(map[string]*slidingWindow),
+		windowSz:   time.Minute,
+		lastAccess: make(map[string]time.Time),
 	}
 }
 
@@ -38,6 +41,9 @@ func (r *RPM) Allow(ctx context.Context, key string) (bool, error) {
 
 	now := time.Now().UTC()
 	windowStart := now.Add(-r.windowSz)
+
+	// Track last access
+	r.lastAccess[key] = now
 
 	sw, exists := r.windows[key]
 	if !exists || sw.startTime.Before(windowStart) {
@@ -60,6 +66,10 @@ func (r *RPM) Record(ctx context.Context, key string, delta int) error {
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
+
+	// Track last access
+	r.lastAccess[key] = now
+
 	sw, exists := r.windows[key]
 	if !exists {
 		sw = &slidingWindow{
@@ -138,4 +148,56 @@ func (r *RPM) pruneWindow(sw *slidingWindow, windowStart time.Time) {
 	}
 	sw.counts = sw.counts[:validIdx]
 	sw.timestamps = sw.timestamps[:validIdx]
+}
+
+// LoadState loads persisted state from database into memory
+// For RPM (sliding window), we can only restore the count, not the timestamps
+// This is an approximation - the actual window will converge after a few minutes
+func (r *RPM) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	if state == nil || state.Current <= 0 {
+		return nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now().UTC()
+
+	// Only load state if it's from the current window
+	if state.WindowStart.After(now.Add(-r.windowSz)) {
+		sw := &slidingWindow{
+			counts:     make([]int, 0),
+			timestamps: make([]time.Time, 0),
+			startTime:  state.WindowStart,
+		}
+
+		// Distribute the count across the window as a single entry
+		// This is an approximation for sliding window
+		sw.counts = append(sw.counts, state.Current)
+		sw.timestamps = append(sw.timestamps, state.WindowStart.Add(r.windowSz/2))
+		r.windows[key] = sw
+		r.lastAccess[key] = now
+	}
+
+	return nil
+}
+
+// CleanupStale removes entries that haven't been accessed for more than maxAge
+func (r *RPM) CleanupStale(maxAge time.Duration) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-maxAge)
+	removed := 0
+
+	for key, lastAccess := range r.lastAccess {
+		if lastAccess.Before(cutoff) {
+			delete(r.windows, key)
+			delete(r.lastAccess, key)
+			removed++
+		}
+	}
+
+	return removed
 }

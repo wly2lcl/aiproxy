@@ -10,10 +10,13 @@ const CircuitBreakerThreshold = 5
 type Account struct {
 	ID         string
 	ProviderID string
-	APIKeyHash string
-	Weight     int
-	Priority   int
-	IsEnabled  bool
+	// APIKey stores the raw API key for upstream API calls.
+	// Note: The field was previously named APIKeyHash which was misleading.
+	// In logs and UI, always use utils.HashAPIKey() to mask the value.
+	APIKey    string
+	Weight    int
+	Priority  int
+	IsEnabled bool
 }
 
 type AccountState struct {
@@ -30,8 +33,8 @@ func (a *Account) Validate() error {
 	if a.ProviderID == "" {
 		return errors.New("provider id is required")
 	}
-	if a.APIKeyHash == "" {
-		return errors.New("api key hash is required")
+	if a.APIKey == "" {
+		return errors.New("api key is required")
 	}
 	if a.Weight < 0 {
 		return errors.New("weight must be non-negative")

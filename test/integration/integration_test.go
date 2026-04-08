@@ -159,7 +159,7 @@ func TestRateLimiterKeyMapping(t *testing.T) {
 	acc1 := &domain.Account{
 		ID:         "account-1",
 		ProviderID: "test-provider",
-		APIKeyHash: "key1",
+		APIKey: "key1",
 		Weight:     1,
 		Priority:   1,
 		IsEnabled:  true,
@@ -167,7 +167,7 @@ func TestRateLimiterKeyMapping(t *testing.T) {
 	acc2 := &domain.Account{
 		ID:         "account-2",
 		ProviderID: "test-provider",
-		APIKeyHash: "key2",
+		APIKey: "key2",
 		Weight:     1,
 		Priority:   1,
 		IsEnabled:  true,
@@ -233,7 +233,7 @@ func TestAccountSwitchingRetry(t *testing.T) {
 	acc1 := &domain.Account{
 		ID:         "account-1",
 		ProviderID: "test-provider",
-		APIKeyHash: "key1",
+		APIKey: "key1",
 		Weight:     1,
 		Priority:   1,
 		IsEnabled:  true,
@@ -241,7 +241,7 @@ func TestAccountSwitchingRetry(t *testing.T) {
 	acc2 := &domain.Account{
 		ID:         "account-2",
 		ProviderID: "test-provider",
-		APIKeyHash: "key2",
+		APIKey: "key2",
 		Weight:     1,
 		Priority:   1,
 		IsEnabled:  true,
@@ -249,7 +249,7 @@ func TestAccountSwitchingRetry(t *testing.T) {
 	acc3 := &domain.Account{
 		ID:         "account-3",
 		ProviderID: "test-provider",
-		APIKeyHash: "key3",
+		APIKey: "key3",
 		Weight:     1,
 		Priority:   1,
 		IsEnabled:  true,

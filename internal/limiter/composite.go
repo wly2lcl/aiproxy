@@ -3,6 +3,7 @@ package limiter
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/wangluyao/aiproxy/internal/domain"
 )
@@ -130,4 +131,45 @@ func (c *CompositeLimiter) GetLimiters() []Limiter {
 	result := make([]Limiter, len(c.limiters))
 	copy(result, c.limiters)
 	return result
+}
+
+// LoadState loads persisted state from database into memory for all sub-limiters
+func (c *CompositeLimiter) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Load state into the matching limiter type
+	for _, l := range c.limiters {
+		if l.LimitType() == state.Type {
+			return l.LoadState(ctx, key, state)
+		}
+	}
+	return nil
+}
+
+// LoadAllStates loads all persisted states for a key from storage
+func (c *CompositeLimiter) LoadAllStates(ctx context.Context, key string, states map[domain.LimitType]*domain.LimitState) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, l := range c.limiters {
+		if state, ok := states[l.LimitType()]; ok {
+			if err := l.LoadState(ctx, key, state); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// CleanupStale removes entries that haven't been accessed for more than maxAge
+func (c *CompositeLimiter) CleanupStale(maxAge time.Duration) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	totalRemoved := 0
+	for _, l := range c.limiters {
+		totalRemoved += l.CleanupStale(maxAge)
+	}
+	return totalRemoved
 }

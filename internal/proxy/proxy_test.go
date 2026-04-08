@@ -66,7 +66,7 @@ func TestProxy_ServeHTTP_Success(t *testing.T) {
 	ctx := context.WithValue(req.Context(), "account", &domain.Account{
 		ID:         "test-account",
 		ProviderID: "test-provider",
-		APIKeyHash: "test-key",
+		APIKey: "test-key",
 	})
 	ctx = context.WithValue(ctx, "provider", &mockProvider{
 		name:    "test-provider",
@@ -151,7 +151,7 @@ func TestProxy_ModifyRequest_Headers(t *testing.T) {
 	account := &domain.Account{
 		ID:         "test-account",
 		ProviderID: "test-provider",
-		APIKeyHash: "test-api-key",
+		APIKey: "test-api-key",
 	}
 
 	prov := &mockProvider{

@@ -410,6 +410,27 @@ curl -X POST http://localhost:8080/admin/reload \
 | `token_daily` | Tokens per day | UTC midnight |
 | `token_monthly` | Tokens per month | UTC 1st |
 
+### State Persistence
+
+Rate limit state is automatically restored from database after service restart:
+
+- **Daily/Monthly/Token**: Exact count restoration
+- **RPM/Window**: Approximate restoration (timestamps cannot be precisely recovered)
+
+### Memory Cleanup
+
+Periodic cleanup of inactive rate limit entries to prevent memory growth:
+
+```json
+"rate_limits": {
+  "cleanup_interval": "1h",
+  "window_5h_duration": "5h"
+}
+```
+
+- `cleanup_interval`: Cleanup task interval, default 1 hour
+- Entries not accessed for over 1 hour are removed
+
 ## Resilience
 
 ### Retry

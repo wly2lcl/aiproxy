@@ -276,7 +276,7 @@ func TestAdminHandler_UpdateAccount(t *testing.T) {
 		{
 			ID:         "test-account",
 			ProviderID: "test-provider",
-			APIKeyHash: "hash123",
+			APIKey: "hash123",
 			Weight:     1,
 			Priority:   0,
 			IsEnabled:  true,
@@ -372,7 +372,7 @@ func TestAdminHandler_DeleteAccount(t *testing.T) {
 		{
 			ID:         "test-account",
 			ProviderID: "test-provider",
-			APIKeyHash: "hash123",
+			APIKey: "hash123",
 			Weight:     1,
 			Priority:   0,
 			IsEnabled:  true,
@@ -415,7 +415,7 @@ func TestAdminHandler_ResetLimits(t *testing.T) {
 		{
 			ID:         "test-account",
 			ProviderID: "test-provider",
-			APIKeyHash: "hash123",
+			APIKey: "hash123",
 			Weight:     1,
 			Priority:   0,
 			IsEnabled:  true,
@@ -615,7 +615,7 @@ func TestAdminHandler_Health(t *testing.T) {
 			{
 				ID:         "test-account",
 				ProviderID: "test-provider",
-				APIKeyHash: "hash123",
+				APIKey: "hash123",
 				Weight:     1,
 				Priority:   0,
 				IsEnabled:  true,
@@ -768,7 +768,7 @@ func setupTestProviderAndAccount(t *testing.T, db *storage.SQLite) {
 	account := &domain.Account{
 		ID:         "test-account",
 		ProviderID: "test-provider",
-		APIKeyHash: "hash123",
+		APIKey: "hash123",
 		Weight:     1,
 		Priority:   0,
 		IsEnabled:  true,

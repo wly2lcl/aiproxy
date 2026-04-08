@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/wangluyao/aiproxy/internal/domain"
 	"github.com/wangluyao/aiproxy/internal/limiter"
@@ -63,11 +64,19 @@ func (m *mockLimiter) LimitType() domain.LimitType {
 	return domain.LimitTypeRPM
 }
 
+func (m *mockLimiter) LoadState(ctx context.Context, key string, state *domain.LimitState) error {
+	return nil
+}
+
+func (m *mockLimiter) CleanupStale(maxAge time.Duration) int {
+	return 0
+}
+
 func createTestAccount(id string, weight int, enabled bool) *domain.Account {
 	return &domain.Account{
 		ID:         id,
 		ProviderID: "test-provider",
-		APIKeyHash: "hash-" + id,
+		APIKey: "hash-" + id,
 		Weight:     weight,
 		Priority:   0,
 		IsEnabled:  enabled,

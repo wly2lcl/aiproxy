@@ -310,7 +310,7 @@ func (s *Server) initAccountPool(pc config.ProviderConfig) error {
 		account := &domain.Account{
 			ID:         utils.GenerateAccountID(pc.Name, keyConfig.Key),
 			ProviderID: pc.Name,
-			APIKeyHash: keyConfig.Key,
+			APIKey: keyConfig.Key,
 			Weight:     keyConfig.Weight,
 			Priority:   keyConfig.Priority,
 			IsEnabled:  true,
@@ -381,7 +381,58 @@ func (s *Server) initAccountLimiter(accountID string, limits *domain.AccountLimi
 	}
 
 	if len(limiters) > 0 {
-		s.limiters[accountID] = limiter.NewCompositeLimiter(limiters...)
+		composite := limiter.NewCompositeLimiter(limiters...)
+		s.limiters[accountID] = composite
+
+		// Load persisted rate limit state from database
+		if s.storage != nil {
+			s.loadRateLimitState(context.Background(), accountID, composite)
+		}
+	}
+}
+
+// loadRateLimitState loads persisted rate limit state from database into the limiter
+func (s *Server) loadRateLimitState(ctx context.Context, accountID string, composite *limiter.CompositeLimiter) {
+	states, err := s.storage.GetAllRateLimits(ctx, accountID)
+	if err != nil {
+		slog.Warn("failed to load rate limit state", "account_id", accountID[:8], "error", err)
+		return
+	}
+
+	if len(states) == 0 {
+		return
+	}
+
+	stateMap := make(map[domain.LimitType]*domain.LimitState)
+	for _, state := range states {
+		stateMap[state.Type] = state
+	}
+
+	if err := composite.LoadAllStates(ctx, accountID, stateMap); err != nil {
+		slog.Warn("failed to restore rate limit state", "account_id", accountID[:8], "error", err)
+		return
+	}
+
+	slog.Info("restored rate limit state", "account_id", accountID[:8], "types", len(states))
+}
+
+// cleanupStaleLimiters removes stale entries from all in-memory limiters
+func (s *Server) cleanupStaleLimiters(maxAge time.Duration) {
+	s.mu.RLock()
+	limiters := make(map[string]*limiter.CompositeLimiter, len(s.limiters))
+	for k, v := range s.limiters {
+		limiters[k] = v
+	}
+	s.mu.RUnlock()
+
+	totalRemoved := 0
+	for _, composite := range limiters {
+		removed := composite.CleanupStale(maxAge)
+		totalRemoved += removed
+	}
+
+	if totalRemoved > 0 {
+		slog.Info("cleaned up stale limiter entries", "removed", totalRemoved, "max_age", maxAge)
 	}
 }
 
@@ -416,6 +467,9 @@ func (s *Server) startCleanupTask() {
 
 		slog.Info("started rate limit cleanup task", "interval", cleanupInterval)
 
+		// Default max age for stale entries (1 hour)
+		cleanupMaxAge := time.Hour
+
 		for {
 			select {
 			case <-s.shutdownChan:
@@ -426,6 +480,9 @@ func (s *Server) startCleanupTask() {
 				if err := s.storage.CleanupExpiredRateLimits(ctx); err != nil {
 					slog.Error("failed to cleanup expired rate limits", "error", err)
 				}
+
+				// Cleanup stale in-memory limiter entries
+				s.cleanupStaleLimiters(cleanupMaxAge)
 			}
 		}
 	}()
@@ -783,7 +840,7 @@ func (s *Server) executeRequest(c *gin.Context, req *openai.ChatCompletionReques
 			slog.Info("retrying request", "attempt", attempt, "delay", delay, "provider", providerName, "account_id", account.ID[:8])
 		}
 
-		httpReq, err := prov.TransformRequest(&reqCopy, account.APIKeyHash)
+		httpReq, err := prov.TransformRequest(&reqCopy, account.APIKey)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1298,7 +1355,7 @@ func (s *Server) handleAdminCreateAccount(c *gin.Context) {
 	account := &domain.Account{
 		ID:         utils.GenerateUUID(),
 		ProviderID: req.ProviderID,
-		APIKeyHash: req.APIKey,
+		APIKey: req.APIKey,
 		Weight:     req.Weight,
 		Priority:   req.Priority,
 		IsEnabled:  true,
