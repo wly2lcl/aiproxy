@@ -19,13 +19,29 @@ func Load(path string) (*Config, error) {
 }
 
 func LoadFromBytes(data []byte) (*Config, error) {
+	// Expand environment variables in the config before parsing
+	expandedData := expandEnvVars(string(data))
+
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal([]byte(expandedData), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
 	ApplyDefaults(&cfg)
 	ApplyEnvironmentOverrides(&cfg)
 	return &cfg, nil
+}
+
+// expandEnvVars replaces ${ENV_VAR} patterns with their environment variable values
+func expandEnvVars(s string) string {
+	return os.Expand(s, func(key string) string {
+		// Support both ${VAR} and ${VAR:-default} syntax
+		parts := strings.SplitN(key, ":-", 2)
+		val := os.Getenv(parts[0])
+		if val == "" && len(parts) > 1 {
+			val = parts[1] // Use default value if env var is empty
+		}
+		return val
+	})
 }
 
 func ApplyDefaults(cfg *Config) {

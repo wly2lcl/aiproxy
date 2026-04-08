@@ -8,6 +8,13 @@ import (
 	"github.com/wangluyao/aiproxy/internal/domain"
 )
 
+const (
+	// MaxLatencySamples is the maximum number of latency samples to keep per key
+	MaxLatencySamples = 10000
+	// MaxTTFTSamples is the maximum number of TTFT samples to keep per key
+	MaxTTFTSamples = 10000
+)
+
 type RequestMetrics struct {
 	Count   int64
 	Errors  int64
@@ -82,6 +89,11 @@ func (c *Collector) RecordRequest(provider, model string, status int, latency ti
 	metrics.Count++
 	metrics.Tokens += int64(tokens)
 	metrics.Latency = append(metrics.Latency, latency)
+	// Cap the latency array to prevent unbounded memory growth
+	if len(metrics.Latency) > MaxLatencySamples {
+		// Keep the most recent samples
+		metrics.Latency = metrics.Latency[len(metrics.Latency)-MaxLatencySamples:]
+	}
 
 	c.totalTokens += int64(tokens)
 	c.totalLatency += latency
@@ -109,6 +121,11 @@ func (c *Collector) RecordTTFT(provider, model string, ttft time.Duration) {
 	}
 
 	metrics.TTFT = append(metrics.TTFT, ttft)
+	// Cap the TTFT array to prevent unbounded memory growth
+	if len(metrics.TTFT) > MaxTTFTSamples {
+		// Keep the most recent samples
+		metrics.TTFT = metrics.TTFT[len(metrics.TTFT)-MaxTTFTSamples:]
+	}
 	c.totalTTFT += ttft
 	c.ttftCount++
 }

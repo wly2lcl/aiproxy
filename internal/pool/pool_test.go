@@ -517,3 +517,108 @@ func TestPool_OrderPreserved(t *testing.T) {
 		}
 	}
 }
+
+// TestAccountSwitchingRetry tests that the system can switch to different accounts
+// when one fails, simulating the retry behavior in main.go
+func TestAccountSwitchingRetry(t *testing.T) {
+	p := NewPool([]*domain.Account{
+		createTestAccount("acc1", 1, true),
+		createTestAccount("acc2", 1, true),
+		createTestAccount("acc3", 1, true),
+	})
+
+	ml := newMockLimiter()
+	composite := limiter.NewCompositeLimiter(ml)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+		"acc3": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
+
+	ctx := context.Background()
+	excludedAccounts := make(map[string]bool)
+	selectedAccounts := make([]string, 0, 3)
+
+	// Simulate selecting 3 different accounts, excluding each one after use
+	for len(excludedAccounts) < 3 {
+		// Try to find a non-excluded account
+		found := false
+		for i := 0; i < 10; i++ { // Max tries to avoid infinite loop
+			acc, err := selector.Select(ctx, nil)
+			if err != nil {
+				t.Fatalf("Select failed: %v", err)
+			}
+			if !excludedAccounts[acc.ID] {
+				selectedAccounts = append(selectedAccounts, acc.ID)
+				excludedAccounts[acc.ID] = true
+				// Simulate recording failure to mark account as unavailable
+				p.RecordFailure(acc.ID)
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("Could not find non-excluded account")
+		}
+	}
+
+	// Verify we selected 3 different accounts
+	if len(selectedAccounts) != 3 {
+		t.Errorf("expected 3 selected accounts, got %d", len(selectedAccounts))
+	}
+
+	// Verify all accounts are different
+	seen := make(map[string]bool)
+	for _, id := range selectedAccounts {
+		if seen[id] {
+			t.Errorf("account %s was selected more than once", id)
+		}
+		seen[id] = true
+	}
+
+	// Verify we have all 3 accounts
+	for _, expectedID := range []string{"acc1", "acc2", "acc3"} {
+		if !seen[expectedID] {
+			t.Errorf("expected account %s to be selected", expectedID)
+		}
+	}
+}
+
+// TestAccountSwitchingWithCircuitBreaker tests that accounts with circuit breaker open
+// are excluded from selection
+func TestAccountSwitchingWithCircuitBreaker(t *testing.T) {
+	p := NewPool([]*domain.Account{
+		createTestAccount("acc1", 1, true),
+		createTestAccount("acc2", 1, true),
+		createTestAccount("acc3", 1, true),
+	})
+
+	// Simulate acc1 and acc2 reaching circuit breaker threshold
+	for i := 0; i < domain.CircuitBreakerThreshold; i++ {
+		p.RecordFailure("acc1")
+		p.RecordFailure("acc2")
+	}
+
+	ml := newMockLimiter()
+	composite := limiter.NewCompositeLimiter(ml)
+	limiters := map[string]*limiter.CompositeLimiter{
+		"acc1": composite,
+		"acc2": composite,
+		"acc3": composite,
+	}
+	selector := NewWeightedRoundRobin(p, limiters)
+
+	ctx := context.Background()
+
+	// Only acc3 should be available
+	for i := 0; i < 5; i++ {
+		acc, err := selector.Select(ctx, nil)
+		if err != nil {
+			t.Fatalf("Select failed: %v", err)
+		}
+		if acc.ID != "acc3" {
+			t.Errorf("expected acc3 (others have circuit breaker open), got %s", acc.ID)
+		}
+	}
+}

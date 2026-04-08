@@ -28,8 +28,8 @@
   "auth": {
     "enabled": true,
     "api_keys": [
-      "sk-aiproxy-secret-key-1",
-      "sk-aiproxy-secret-key-2"
+      "${AIPROXY_AUTH_API_KEY:-sk-aiproxy-placeholder-1}",
+      "${AIPROXY_AUTH_API_KEY_2:-sk-aiproxy-placeholder-2}"
     ],
     "header_name": "Authorization",
     "key_prefix": "Bearer ",
@@ -57,7 +57,7 @@
       "stream_timeout": "600s",
       "api_keys": [
         {
-          "key": "sk-or-v1-key1",
+          "key": "${OPENROUTER_API_KEY:-sk-or-v1-placeholder}",
           "name": "primary-account",
           "weight": 2,
           "priority": 2,
@@ -72,7 +72,7 @@
           }
         },
         {
-          "key": "sk-or-v1-key2",
+          "key": "${OPENROUTER_API_KEY_2:-sk-or-v1-placeholder2}",
           "name": "backup-account",
           "weight": 1,
           "priority": 1,
@@ -111,7 +111,7 @@
       "stream_timeout": "600s",
       "api_keys": [
         {
-          "key": "sk-proj-your-openai-key-1",
+          "key": "${OPENAI_API_KEY:-sk-proj-placeholder}",
           "name": "openai-primary",
           "weight": 2,
           "priority": 2,
@@ -124,7 +124,7 @@
           }
         },
         {
-          "key": "sk-proj-your-openai-key-2",
+          "key": "${OPENAI_API_KEY_2:-sk-proj-placeholder2}",
           "name": "openai-backup",
           "weight": 1,
           "priority": 1,
@@ -162,7 +162,7 @@
       "stream_timeout": "600s",
       "api_keys": [
         {
-          "key": "gsk_your_groq_key",
+          "key": "${GROQ_API_KEY:-gsk_placeholder}",
           "name": "groq-primary",
           "weight": 1,
           "priority": 2,
@@ -200,7 +200,7 @@
   "admin": {
     "enabled": true,
     "api_keys": [
-      "admin-secret-key-1"
+      "${AIPROXY_ADMIN_API_KEY:-admin-placeholder-key}"
     ],
     "rate_limit": 100
   },

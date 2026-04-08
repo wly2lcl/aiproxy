@@ -140,13 +140,128 @@ go run ./cmd/server
 
 ### 环境变量
 
-使用环境变量覆盖配置：
+配置文件支持环境变量展开，语法为 `${ENV_VAR}` 或 `${ENV_VAR:-默认值}`：
+
+```json
+{
+  "providers": [
+    {
+      "name": "openai",
+      "api_keys": [
+        {"key": "${OPENAI_API_KEY}", "weight": 1}
+      ]
+    },
+    {
+      "name": "openrouter",
+      "api_keys": [
+        {"key": "${OPENROUTER_API_KEY:-sk-or-default-placeholder}", "weight": 1}
+      ]
+    }
+  ],
+  "auth": {
+    "api_keys": ["${AIPROXY_AUTH_API_KEY}"]
+  },
+  "admin": {
+    "api_keys": ["${AIPROXY_ADMIN_API_KEY}"]
+  }
+}
+```
+
+然后设置环境变量：
 
 ```bash
-export AIPROXY_SERVER_PORT=9090
-export AIPROXY_DATABASE_PATH=/data/aiproxy.db
-export AIPROXY_LOGGING_LEVEL=debug
+export OPENAI_API_KEY=sk-proj-your-real-key
+export OPENROUTER_API_KEY=sk-or-your-real-key
+export AIPROXY_AUTH_API_KEY=your-auth-key
+export AIPROXY_ADMIN_API_KEY=your-admin-key
 ```
+
+## 安全最佳实践
+
+### API 密钥管理
+
+1. **永远不要将 API 密钥提交到版本控制**
+   - 使用环境变量存储敏感密钥
+   - 将 `config/config.json` 添加到 `.gitignore`
+   - 使用 `config/config.example.json` 作为模板
+
+2. **从硬编码密钥迁移到环境变量**
+
+   如果配置文件中有硬编码密钥，请按以下方式迁移：
+
+   迁移前：
+   ```json
+   {
+     "providers": [{
+       "api_keys": [{"key": "sk-proj-actual-key-here"}]
+     }]
+   }
+   ```
+
+   迁移后：
+   ```json
+   {
+     "providers": [{
+       "api_keys": [{"key": "${OPENAI_API_KEY}"}]
+     }]
+   }
+   ```
+
+   然后导出密钥：
+   ```bash
+   export OPENAI_API_KEY=sk-proj-actual-key-here
+   ```
+
+3. **不同环境使用不同密钥**
+   - 开发、测试、生产环境应使用不同的 API 密钥
+   - 定期轮换密钥
+
+4. **启用认证**
+   ```json
+   {
+     "auth": {
+       "enabled": true,
+       "api_keys": ["${AIPROXY_AUTH_API_KEY}"]
+     },
+     "admin": {
+       "api_keys": ["${AIPROXY_ADMIN_API_KEY}"]
+     }
+   }
+   ```
+
+5. **配置可信代理**
+   - 如果部署在反向代理后面，正确配置 `X-Forwarded-For` 头处理
+   - 基于 IP 的限流依赖正确的客户端 IP 识别
+
+### 网络安全
+
+1. **生产环境使用 HTTPS**
+   - 部署在 TLS 终止的反向代理后面（nginx、Caddy 等）
+
+2. **限制管理后台访问**
+   - `/` 和 `/dashboard` 页面公开可访问（仅 UI）
+   - 管理 API 端点需要认证
+   - 生产环境考虑 IP 限制
+
+3. **正确配置 CORS**
+   ```json
+   {
+     "cors": {
+       "enabled": true,
+       "allowed_origins": ["https://your-domain.com"]
+     }
+   }
+   ```
+
+### 数据安全
+
+1. **数据库位置**
+   - 将 `aiproxy.db` 存储在安全目录
+   - 敏感部署考虑使用加密文件系统
+
+2. **日志敏感性**
+   - `include_request_body` 和 `include_response_body` 可能记录敏感内容
+   - 除非必要，生产环境应禁用
 
 ## API 端点
 

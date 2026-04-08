@@ -14,6 +14,25 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Common time formats used in the database
+var timeFormats = []string{
+	time.RFC3339,
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05Z07:00",
+	"2006-01-02T15:04:05",
+}
+
+// parseTimeMultiFormat attempts to parse a time string using multiple common formats.
+// Returns the parsed time and whether parsing was successful.
+func parseTimeMultiFormat(timeStr string) (time.Time, bool) {
+	for _, format := range timeFormats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 type SQLite struct {
 	db *sql.DB
 }
@@ -454,7 +473,10 @@ func (s *SQLite) CleanupExpiredRateLimits(ctx context.Context) error {
 		return fmt.Errorf("failed to cleanup expired rate limits: %w", err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		slog.Warn("failed to get rows affected for cleanup", "error", err)
+	}
 	if rowsAffected > 0 {
 		slog.Info("cleaned up expired rate limits", "count", rowsAffected)
 	}
@@ -676,9 +698,10 @@ func (s *SQLite) GetRequestTimeSeries(ctx context.Context, since time.Time, inte
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan time series point: %w", err)
 		}
-		p.Timestamp, err = time.Parse("2006-01-02 15:04:05", tsStr)
-		if err != nil {
-			slog.Error("failed to parse timestamp", "timestamp", tsStr, "error", err)
+		if t, ok := parseTimeMultiFormat(tsStr); ok {
+			p.Timestamp = t
+		} else {
+			slog.Error("failed to parse timestamp", "timestamp", tsStr)
 		}
 		points = append(points, &p)
 	}
@@ -941,13 +964,10 @@ func (s *SQLite) GetBlockedIPs(ctx context.Context) ([]BlockedIP, error) {
 		if err := rows.Scan(&ip.IP, &blockedAtStr, &reason); err != nil {
 			return nil, fmt.Errorf("failed to scan blocked ip: %w", err)
 		}
-		ip.BlockedAt, err = time.Parse(time.RFC3339, blockedAtStr)
-		if err != nil {
-			slog.Debug("failed to parse blocked_at as RFC3339, trying alternative format", "blocked_at", blockedAtStr, "error", err)
-			ip.BlockedAt, err = time.Parse("2006-01-02 15:04:05", blockedAtStr)
-			if err != nil {
-				slog.Error("failed to parse blocked_at timestamp", "blocked_at", blockedAtStr, "error", err)
-			}
+		if t, ok := parseTimeMultiFormat(blockedAtStr); ok {
+			ip.BlockedAt = t
+		} else {
+			slog.Error("failed to parse blocked_at timestamp", "blocked_at", blockedAtStr)
 		}
 		if reason.Valid {
 			ip.Reason = reason.String
@@ -990,21 +1010,15 @@ func (s *SQLite) GetAuthFailures(ctx context.Context) ([]AuthFailure, error) {
 		if err := rows.Scan(&f.IP, &f.FailureCount, &firstSeenStr, &lastSeenStr); err != nil {
 			return nil, fmt.Errorf("failed to scan auth failure: %w", err)
 		}
-		f.FirstSeen, err = time.Parse(time.RFC3339, firstSeenStr)
-		if err != nil {
-			slog.Debug("failed to parse first_seen as RFC3339, trying alternative format", "first_seen", firstSeenStr, "error", err)
-			f.FirstSeen, err = time.Parse("2006-01-02 15:04:05", firstSeenStr)
-			if err != nil {
-				slog.Error("failed to parse first_seen timestamp", "first_seen", firstSeenStr, "error", err)
-			}
+		if t, ok := parseTimeMultiFormat(firstSeenStr); ok {
+			f.FirstSeen = t
+		} else {
+			slog.Error("failed to parse first_seen timestamp", "first_seen", firstSeenStr)
 		}
-		f.LastSeen, err = time.Parse(time.RFC3339, lastSeenStr)
-		if err != nil {
-			slog.Debug("failed to parse last_seen as RFC3339, trying alternative format", "last_seen", lastSeenStr, "error", err)
-			f.LastSeen, err = time.Parse("2006-01-02 15:04:05", lastSeenStr)
-			if err != nil {
-				slog.Error("failed to parse last_seen timestamp", "last_seen", lastSeenStr, "error", err)
-			}
+		if t, ok := parseTimeMultiFormat(lastSeenStr); ok {
+			f.LastSeen = t
+		} else {
+			slog.Error("failed to parse last_seen timestamp", "last_seen", lastSeenStr)
 		}
 		failures = append(failures, f)
 	}

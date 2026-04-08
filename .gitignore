@@ -88,5 +88,12 @@ dist/
 # Test artifacts
 test_output/
 
+# Claude Code
+.claude/
+
+# OpenSpec (change management worktrees)
+openspec/changes/*/worktrees/
+.sisyphus/
+
 # Binary (root level only)
 /server

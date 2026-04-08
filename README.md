@@ -150,6 +150,131 @@ export AIPROXY_DATABASE_PATH=/data/aiproxy.db
 export AIPROXY_LOGGING_LEVEL=debug
 ```
 
+#### API Keys via Environment Variables
+
+For security, you can configure API keys using environment variables instead of hardcoding them in the config file. Use the `${ENV_VAR}` or `${ENV_VAR:-default}` syntax:
+
+```json
+{
+  "providers": [
+    {
+      "name": "openai",
+      "api_keys": [
+        {"key": "${OPENAI_API_KEY}", "weight": 1}
+      ]
+    },
+    {
+      "name": "openrouter",
+      "api_keys": [
+        {"key": "${OPENROUTER_API_KEY:-sk-or-default-placeholder}", "weight": 1}
+      ]
+    }
+  ],
+  "auth": {
+    "api_keys": ["${AIPROXY_AUTH_API_KEY}"]
+  },
+  "admin": {
+    "api_keys": ["${AIPROXY_ADMIN_API_KEY}"]
+  }
+}
+```
+
+Then set the environment variables:
+
+```bash
+export OPENAI_API_KEY=sk-proj-your-real-key
+export OPENROUTER_API_KEY=sk-or-your-real-key
+export AIPROXY_AUTH_API_KEY=your-auth-key
+export AIPROXY_ADMIN_API_KEY=your-admin-key
+```
+
+## Security Best Practices
+
+### API Key Management
+
+1. **Never commit API keys to version control**
+   - Use environment variables for sensitive keys
+   - Keep `config/config.json` in `.gitignore`
+   - Use `config/config.example.json` as a template
+
+2. **Migrating from hardcoded keys to environment variables**
+   
+   If you have a config with hardcoded keys, migrate as follows:
+   
+   Before:
+   ```json
+   {
+     "providers": [{
+       "api_keys": [{"key": "sk-proj-actual-key-here"}]
+     }]
+   }
+   ```
+   
+   After:
+   ```json
+   {
+     "providers": [{
+       "api_keys": [{"key": "${OPENAI_API_KEY}"}]
+     }]
+   }
+   ```
+   
+   Then export the key:
+   ```bash
+   export OPENAI_API_KEY=sk-proj-actual-key-here
+   ```
+
+3. **Use separate keys for different environments**
+   - Development, staging, and production should use different API keys
+   - Rotate keys periodically
+
+3. **Enable authentication**
+   ```json
+   {
+     "auth": {
+       "enabled": true,
+       "api_keys": ["${AIPROXY_AUTH_API_KEY}"]
+     },
+     "admin": {
+       "api_keys": ["${AIPROXY_ADMIN_API_KEY}"]
+     }
+   }
+   ```
+
+4. **Configure trusted proxies**
+   - If behind a reverse proxy, configure `X-Forwarded-For` header handling
+   - IP-based rate limiting depends on correct client IP detection
+
+### Network Security
+
+1. **Use HTTPS in production**
+   - Deploy behind a TLS-terminating reverse proxy (nginx, Caddy, etc.)
+
+2. **Restrict admin dashboard access**
+   - The dashboard at `/` and `/dashboard` is publicly accessible (UI only)
+   - Admin API endpoints require authentication
+   - Consider IP-based restrictions in production
+
+3. **Configure CORS appropriately**
+   ```json
+   {
+     "cors": {
+       "enabled": true,
+       "allowed_origins": ["https://your-domain.com"]
+     }
+   }
+   ```
+
+### Data Security
+
+1. **Database location**
+   - Store `aiproxy.db` in a secure directory
+   - Consider encrypted filesystem for sensitive deployments
+
+2. **Logging sensitivity**
+   - `include_request_body` and `include_response_body` may log sensitive content
+   - Disable in production unless necessary
+
 ## API Endpoints
 
 All endpoints are served on port 8080.
